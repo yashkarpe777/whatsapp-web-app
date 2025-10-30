@@ -1,4 +1,3 @@
-import { Header } from "@/components/Header";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
 import { Download, TrendingUp, MessageSquare, CheckCircle2, XCircle } from "lucide-react";
@@ -12,9 +11,7 @@ const Reports = () => {
   ];
 
   return (
-    <div className="min-h-screen bg-background">
-      <Header />
-      <main className="p-4 sm:p-6 space-y-6">
+    <div className="p-4 sm:p-6 space-y-6">
         <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
           <div>
             <h1 className="text-3xl font-bold text-foreground">Reports</h1>
@@ -111,7 +108,6 @@ const Reports = () => {
             ))}
           </div>
         </Card>
-      </main>
     </div>
   );
 };

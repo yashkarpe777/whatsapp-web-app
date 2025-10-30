@@ -1,4 +1,3 @@
-import { Header } from "@/components/Header";
 import { CampaignCard } from "@/components/CampaignCard";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -7,9 +6,7 @@ import { Plus, Search, Filter, Megaphone, Sparkles, Calendar, Headphones, Gift, 
 
 const Campaigns = () => {
   return (
-    <div className="min-h-screen bg-background">
-      <Header />
-      <main className="p-4 sm:p-6 space-y-6">
+    <div className="p-4 sm:p-6 space-y-6">
         <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
           <h1 className="text-3xl font-bold text-foreground">Campaigns</h1>
           <Button className="w-full sm:w-auto bg-primary hover:bg-primary/90">
@@ -164,7 +161,6 @@ const Campaigns = () => {
             </div>
           </TabsContent>
         </Tabs>
-      </main>
 
       <Button
         size="lg"

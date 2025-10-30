@@ -1,4 +1,3 @@
-import { Header } from "@/components/Header";
 import { StatCard } from "@/components/StatCard";
 import { CampaignCard } from "@/components/CampaignCard";
 import { Button } from "@/components/ui/button";
@@ -6,9 +5,7 @@ import { Plus, Activity, Send, CheckCircle2, Megaphone, Sparkles, Calendar, Head
 
 const Dashboard = () => {
   return (
-    <div className="min-h-screen bg-background">
-      <Header />
-      <main className="p-4 sm:p-6 space-y-8">
+    <div className="p-4 sm:p-6 space-y-8">
         <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
           <h1 className="text-3xl font-bold text-foreground">Welcome, Alex!</h1>
           <Button className="w-full sm:w-auto bg-primary hover:bg-primary/90">
@@ -79,7 +76,6 @@ const Dashboard = () => {
             />
           </div>
         </div>
-      </main>
 
       <Button
         size="lg"
