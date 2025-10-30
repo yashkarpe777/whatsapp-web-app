@@ -1,16 +1,35 @@
-import { Send, User } from "lucide-react";
+import { Send, User, Moon, Sun } from "lucide-react";
 import { Link } from "react-router-dom";
+import { useTheme } from "next-themes";
+import { useEffect, useState } from "react";
 
 export const Header = () => {
+  const { theme, setTheme } = useTheme();
+  const [mounted, setMounted] = useState(false);
+
+  useEffect(() => {
+    setMounted(true);
+  }, []);
+
   return (
     <header className="sticky top-0 z-50 flex h-16 items-center justify-between border-b border-border bg-background/80 px-4 backdrop-blur-sm sm:px-6">
       <Link to="/" className="flex items-center gap-2">
         <Send className="h-7 w-7 text-primary" />
-        <h1 className="text-xl font-bold text-foreground">Campaigns</h1>
+        <h1 className="text-xl font-bold text-foreground">Campaigner</h1>
       </Link>
-      <button className="flex h-10 w-10 items-center justify-center rounded-full bg-muted hover:bg-accent transition-colors">
-        <User className="h-5 w-5 text-muted-foreground" />
-      </button>
+      <div className="flex items-center gap-2">
+        {mounted && (
+          <button 
+            onClick={() => setTheme(theme === "dark" ? "light" : "dark")}
+            className="flex h-10 w-10 items-center justify-center rounded-full bg-muted hover:bg-accent transition-colors"
+          >
+            {theme === "dark" ? <Sun className="h-5 w-5" /> : <Moon className="h-5 w-5" />}
+          </button>
+        )}
+        <button className="flex h-10 w-10 items-center justify-center rounded-full bg-muted hover:bg-accent transition-colors">
+          <User className="h-5 w-5 text-muted-foreground" />
+        </button>
+      </div>
     </header>
   );
 };

@@ -38,6 +38,14 @@ const Dashboard = () => {
           />
         </div>
 
+        <div className="rounded-xl bg-gradient-to-br from-primary via-primary to-purple-600 p-8 text-white mb-8">
+          <h1 className="text-4xl font-bold mb-2">Welcome back, Alex!</h1>
+          <p className="text-white/90 mb-6">Ready to launch your next successful campaign? Let's get started.</p>
+          <Button size="lg" className="bg-white text-primary hover:bg-white/90 font-semibold">
+            Create New Campaign
+          </Button>
+        </div>
+
         <div>
           <h2 className="text-2xl font-bold text-foreground mb-6">Recent Campaigns</h2>
           <div className="grid gap-4 sm:grid-cols-2">
