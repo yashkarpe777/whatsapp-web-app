@@ -6,7 +6,8 @@ import { Plus, Search, Filter, Megaphone, Sparkles, Calendar, Headphones, Gift, 
 
 const Campaigns = () => {
   return (
-    <div className="p-4 sm:p-6 space-y-6">
+    <div className="min-h-screen bg-background p-6">
++      <main className="space-y-6">
         <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
           <h1 className="text-3xl font-bold text-foreground">Campaigns</h1>
           <Button className="w-full sm:w-auto bg-primary hover:bg-primary/90">
@@ -14,7 +15,6 @@ const Campaigns = () => {
             Create Campaign
           </Button>
         </div>
-
         <div className="flex flex-col sm:flex-row gap-4">
           <div className="relative flex-1">
             <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
@@ -161,6 +161,7 @@ const Campaigns = () => {
             </div>
           </TabsContent>
         </Tabs>
+      </main>
 
       <Button
         size="lg"
