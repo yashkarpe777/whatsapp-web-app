@@ -7,7 +7,7 @@ import {
   BarChart3,
   PlayCircle,
   Settings as SettingsIcon,
-  ChevronRight, // Still imported but not used in layout
+  ChevronRight, 
   Menu,
 } from "lucide-react";
 import { NavLink } from "react-router-dom";
