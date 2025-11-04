@@ -98,7 +98,7 @@ const Login = () => {
   };
 
   return (
-    <div className="min-h-screen flex items-center justify-center bg-gradient-to-br from-primary/5 via-background to-purple-500/5 p-4">
+    <div className="flex items-center justify-center min-h-screen w-full bg-gradient-to-br from-primary/10 via-background to-purple-600/5 px-4 py-8">
       <Card className="w-full max-w-md shadow-2xl">
         <CardHeader className="space-y-1 text-center pb-4">
           <div className="flex justify-center mb-4">
