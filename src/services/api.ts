@@ -96,3 +96,22 @@ export const authAPI = {
     }
   },
 };
+
+export const campaignsAPI = {
+  getAll: async () => {
+    const res = await api.get("/campaigns");
+    return res.data;
+  },
+  create: async (data) => {
+    const res = await api.post("/campaigns", data);
+    return res.data;
+  },
+  update: async (id, data) => {
+    const res = await api.patch(`/campaigns/${id}`, data);
+    return res.data;
+  },
+  remove: async (id) => {
+    const res = await api.delete(`/campaigns/${id}`);
+    return res.data;
+  },
+};

@@ -1,26 +1,62 @@
+import { useEffect, useState } from "react";
 import { CampaignCard } from "@/components/CampaignCard";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
-import { Plus, Search, Filter, Megaphone, Sparkles, Calendar, Headphones, Gift, Bell, Mail, Heart } from "lucide-react";
+import { Plus, Search, Filter, Megaphone } from "lucide-react";
+import { campaignsAPI } from "@/services/api";
+import { useToast } from "@/hooks/use-toast";
 
 const Campaigns = () => {
+  const [campaigns, setCampaigns] = useState([]);
+  const [search, setSearch] = useState("");
+  const [activeTab, setActiveTab] = useState("all");
+  const { toast } = useToast();
+
+  useEffect(() => {
+    const fetchCampaigns = async () => {
+      try {
+        const data = await campaignsAPI.getAll();
+        setCampaigns(data);
+      } catch (err) {
+        toast({
+          title: "Error fetching campaigns",
+          description: "Failed to load campaign data.",
+          variant: "destructive",
+        });
+      }
+    };
+    fetchCampaigns();
+  }, []);
+
+  const filteredCampaigns = campaigns.filter((c) => {
+    const matchSearch = c.campaign_name.toLowerCase().includes(search.toLowerCase());
+    if (activeTab === "all") return matchSearch;
+    return matchSearch && c.status === activeTab;
+  });
+
   return (
     <div className="min-h-screen bg-background p-6">
-+      <main className="space-y-6">
+      <main className="space-y-6">
         <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
           <h1 className="text-3xl font-bold text-foreground">Campaigns</h1>
-          <Button className="w-full sm:w-auto bg-primary hover:bg-primary/90">
+          <Button
+            className="w-full sm:w-auto bg-primary hover:bg-primary/90"
+            onClick={() => toast({ title: "Create Campaign clicked" })}
+          >
             <Plus className="h-5 w-5 mr-2" />
             Create Campaign
           </Button>
         </div>
+
         <div className="flex flex-col sm:flex-row gap-4">
           <div className="relative flex-1">
             <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
             <Input
               placeholder="Search campaigns..."
               className="pl-9 bg-card border-border"
+              value={search}
+              onChange={(e) => setSearch(e.target.value)}
             />
           </div>
           <Button variant="outline" className="w-full sm:w-auto">
@@ -29,7 +65,7 @@ const Campaigns = () => {
           </Button>
         </div>
 
-        <Tabs defaultValue="all" className="w-full">
+        <Tabs value={activeTab} onValueChange={setActiveTab} className="w-full">
           <TabsList className="grid w-full grid-cols-4 lg:w-auto lg:inline-grid">
             <TabsTrigger value="all">All</TabsTrigger>
             <TabsTrigger value="active">Active</TabsTrigger>
@@ -37,128 +73,25 @@ const Campaigns = () => {
             <TabsTrigger value="completed">Completed</TabsTrigger>
           </TabsList>
 
-          <TabsContent value="all" className="mt-6">
-            <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
-              <CampaignCard
-                name="Summer Sale Promotion"
-                status="active"
-                date="15 June 2024"
-                icon={<Megaphone className="h-6 w-6" />}
-                stats={{ sent: 10500, delivered: 10342 }}
-              />
-              <CampaignCard
-                name="New Feature Announcement"
-                status="paused"
-                date="12 June 2024"
-                icon={<Sparkles className="h-6 w-6" />}
-                stats={{ sent: 8200, delivered: 8100 }}
-              />
-              <CampaignCard
-                name="Holiday Greetings Blast"
-                status="completed"
-                date="10 June 2024"
-                icon={<Calendar className="h-6 w-6" />}
-                stats={{ sent: 15000, delivered: 14850 }}
-              />
-              <CampaignCard
-                name="Customer Support Follow-up"
-                status="active"
-                date="8 June 2024"
-                icon={<Headphones className="h-6 w-6" />}
-                stats={{ sent: 3200, delivered: 3180 }}
-              />
-              <CampaignCard
-                name="Flash Sale Alert"
-                status="completed"
-                date="5 June 2024"
-                icon={<Gift className="h-6 w-6" />}
-                stats={{ sent: 12000, delivered: 11880 }}
-              />
-              <CampaignCard
-                name="Product Update Notification"
-                status="active"
-                date="3 June 2024"
-                icon={<Bell className="h-6 w-6" />}
-                stats={{ sent: 6500, delivered: 6435 }}
-              />
-              <CampaignCard
-                name="Newsletter - June Edition"
-                status="completed"
-                date="1 June 2024"
-                icon={<Mail className="h-6 w-6" />}
-                stats={{ sent: 18000, delivered: 17820 }}
-              />
-              <CampaignCard
-                name="Customer Appreciation"
-                status="draft"
-                date="Draft"
-                icon={<Heart className="h-6 w-6" />}
-              />
-            </div>
-          </TabsContent>
-
-          <TabsContent value="active" className="mt-6">
-            <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
-              <CampaignCard
-                name="Summer Sale Promotion"
-                status="active"
-                date="15 June 2024"
-                icon={<Megaphone className="h-6 w-6" />}
-                stats={{ sent: 10500, delivered: 10342 }}
-              />
-              <CampaignCard
-                name="Customer Support Follow-up"
-                status="active"
-                date="8 June 2024"
-                icon={<Headphones className="h-6 w-6" />}
-                stats={{ sent: 3200, delivered: 3180 }}
-              />
-              <CampaignCard
-                name="Product Update Notification"
-                status="active"
-                date="3 June 2024"
-                icon={<Bell className="h-6 w-6" />}
-                stats={{ sent: 6500, delivered: 6435 }}
-              />
-            </div>
-          </TabsContent>
-
-          <TabsContent value="paused" className="mt-6">
-            <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
-              <CampaignCard
-                name="New Feature Announcement"
-                status="paused"
-                date="12 June 2024"
-                icon={<Sparkles className="h-6 w-6" />}
-                stats={{ sent: 8200, delivered: 8100 }}
-              />
-            </div>
-          </TabsContent>
-
-          <TabsContent value="completed" className="mt-6">
-            <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
-              <CampaignCard
-                name="Holiday Greetings Blast"
-                status="completed"
-                date="10 June 2024"
-                icon={<Calendar className="h-6 w-6" />}
-                stats={{ sent: 15000, delivered: 14850 }}
-              />
-              <CampaignCard
-                name="Flash Sale Alert"
-                status="completed"
-                date="5 June 2024"
-                icon={<Gift className="h-6 w-6" />}
-                stats={{ sent: 12000, delivered: 11880 }}
-              />
-              <CampaignCard
-                name="Newsletter - June Edition"
-                status="completed"
-                date="1 June 2024"
-                icon={<Mail className="h-6 w-6" />}
-                stats={{ sent: 18000, delivered: 17820 }}
-              />
-            </div>
+          <TabsContent value={activeTab} className="mt-6">
+            {filteredCampaigns.length > 0 ? (
+              <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
+                {filteredCampaigns.map((c) => (
+                  <CampaignCard
+                    key={c.id}
+                    name={c.campaign_name}
+                    status={c.status}
+                    date={new Date(c.created_at).toLocaleDateString()}
+                    icon={<Megaphone className="h-6 w-6" />}
+                    stats={{ sent: 0, delivered: 0 }} // later link to reports table
+                  />
+                ))}
+              </div>
+            ) : (
+              <div className="text-center text-muted-foreground py-10">
+                No campaigns found.
+              </div>
+            )}
           </TabsContent>
         </Tabs>
       </main>
