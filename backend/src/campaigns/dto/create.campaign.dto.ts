@@ -14,6 +14,14 @@ export class CreateCampaignDto {
   media_url?: string;
 
   @IsOptional()
+  @IsString()
+  media_type?: string;
+
+  @IsOptional()
+  @IsString()
+  media_name?: string;
+
+  @IsOptional()
   @IsDateString()
   scheduled_start?: Date;
 

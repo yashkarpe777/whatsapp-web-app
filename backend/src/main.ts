@@ -1,8 +1,47 @@
 import { NestFactory } from '@nestjs/core';
-import { ValidationPipe } from '@nestjs/common';
+import { ValidationPipe, BadRequestException } from '@nestjs/common';
 import { AppModule } from './app.module';
+import * as fs from 'fs';
+import * as path from 'path';
+import { ExceptionFilter, Catch, ArgumentsHost, HttpException, HttpStatus } from '@nestjs/common';
+import { Request, Response } from 'express';
+
+@Catch()
+class GlobalExceptionFilter implements ExceptionFilter {
+  catch(exception: any, host: ArgumentsHost) {
+    const ctx = host.switchToHttp();
+    const response = ctx.getResponse<Response>();
+    const request = ctx.getRequest<Request>();
+
+    console.error('Global exception:', exception);
+
+    const status = 
+      exception instanceof HttpException
+        ? exception.getStatus()
+        : HttpStatus.INTERNAL_SERVER_ERROR;
+
+    const message = 
+      exception instanceof HttpException
+        ? exception.message
+        : 'Internal server error';
+
+    response.status(status).json({
+      statusCode: status,
+      timestamp: new Date().toISOString(),
+      path: request.url,
+      message: message,
+    });
+  }
+}
 
 async function bootstrap() {
+  // Ensure uploads directory exists
+  const uploadsDir = path.join(process.cwd(), 'uploads');
+  if (!fs.existsSync(uploadsDir)) {
+    fs.mkdirSync(uploadsDir, { recursive: true });
+    console.log(`Created uploads directory at ${uploadsDir}`);
+  }
+  
   const app = await NestFactory.create(AppModule);
   
   // Enable CORS for frontend (allow multiple ports)
@@ -15,6 +54,9 @@ async function bootstrap() {
   
   // Enable validation
   app.useGlobalPipes(new ValidationPipe());
+  
+  // Add global exception filter
+  app.useGlobalFilters(new GlobalExceptionFilter());
   
   await app.listen(8080);
   console.log('Backend running on http://localhost:8080');

@@ -115,3 +115,52 @@ export const campaignsAPI = {
     return res.data;
   },
 };
+
+export const contactsAPI = {
+  getAll: async () => {
+    const res = await api.get("/contacts");
+    return res.data;
+  },
+  create: async (data) => {
+    const res = await api.post("/contacts", data);
+    return res.data;
+  },
+  update: async (id, data) => {
+    const res = await api.put(`/contacts/${id}`, data);
+    return res.data;
+  },
+  remove: async (id) => {
+    const res = await api.delete(`/contacts/${id}`);
+    return res.data;
+  },
+  getFiles: async () => {
+    const res = await api.get("/contacts/files");
+    return res.data;
+  },
+  getContactsByFile: async (filename) => {
+    const res = await api.get(`/contacts/file/${encodeURIComponent(filename)}`);
+    return res.data;
+  },
+  removeContactsByFile: async (filename) => {
+    const res = await api.delete(`/contacts/file/${encodeURIComponent(filename)}`);
+    return res.data;
+  },
+  uploadFile: async (file) => {
+    try {
+      const formData = new FormData();
+      formData.append('file', file);
+      
+      const res = await api.post("/contacts/upload", formData, {
+        headers: {
+          'Content-Type': 'multipart/form-data',
+        },
+        // Increase timeout for large files
+        timeout: 30000,
+      });
+      return res.data;
+    } catch (error: any) {
+      console.error('API upload error:', error.response || error);
+      throw error;
+    }
+  },
+};

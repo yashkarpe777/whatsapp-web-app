@@ -26,6 +26,12 @@ export class Campaign {
   @Column({ type: 'text', nullable: true })
   media_url: string;
 
+  @Column({ type: 'varchar', length: 50, nullable: true })
+  media_type: string;
+
+  @Column({ type: 'varchar', length: 255, nullable: true })
+  media_name: string;
+
   @Column({ default: 'draft' })
   status: string;
 
