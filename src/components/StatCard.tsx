@@ -17,7 +17,9 @@ export const StatCard = ({ title, value, trend, icon }: StatCardProps) => {
       <div className="flex items-start justify-between">
         <div className="flex-1">
           <p className="text-sm font-medium text-muted-foreground">{title}</p>
-          <h3 className="mt-2 text-3xl font-bold text-foreground">{value}</h3>
+          <h3 className="mt-2 text-3xl font-bold text-foreground">
+            {value}
+          </h3>
           {trend && (
             <div className="mt-2 flex items-center gap-1">
               {trend.isPositive ? (
@@ -37,7 +39,7 @@ export const StatCard = ({ title, value, trend, icon }: StatCardProps) => {
           )}
         </div>
         {icon && (
-          <div className="rounded-lg bg-primary/10 p-3 text-primary">
+          <div className="rounded-lg p-3 text-primary bg-primary/10">
             {icon}
           </div>
         )}

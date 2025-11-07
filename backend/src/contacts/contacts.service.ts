@@ -25,11 +25,16 @@ export class ContactsService {
   }
 
   async findAll(userId: number) {
+    if (!userId) {
+      throw new Error('User ID is required to get contacts');
+    }
+    
     return this.contactRepo.find({
       where: { user: { id: userId } },
       order: { created_at: 'DESC' }
     });
   }
+  
 
   async findOne(id: number) {
     const contact = await this.contactRepo.findOne({ where: { id } });
@@ -49,16 +54,27 @@ export class ContactsService {
   }
 
   async getContactsByFile(userId: number, filename: string) {
+    if (!userId) {
+      throw new Error('User ID is required to get contacts by file');
+    }
+    
     return this.contactRepo.find({
       where: {
         user: { id: userId },
         source_file: filename
+      },
+      order: {
+        created_at: 'DESC'
       }
     });
   }
 
   async removeContactsByFile(userId: number, filename: string) {
     try {
+      if (!userId) {
+        throw new Error('User ID is required to delete contacts by file');
+      }
+      
       // First, count how many contacts will be deleted
       const count = await this.contactRepo.count({
         where: {
@@ -73,8 +89,6 @@ export class ContactsService {
         source_file: filename
       });
       
-      console.log(`Deleted ${result.affected} contacts from file ${filename} for user ${userId}`);
-      
       return { 
         success: true, 
         count: count,
@@ -88,74 +102,22 @@ export class ContactsService {
 
   async getUniqueFiles(userId: number) {
     try {
-      console.log('Getting files for user ID:', userId);
-      
-      // First, let's check if there are any contacts for this user
-      const contactCount = await this.contactRepo.count({
-        where: { user: { id: userId } }
-      });
-      
-      console.log(`Total contacts for user ${userId}: ${contactCount}`);
-      
-      if (contactCount === 0) {
-        console.log('No contacts found for this user');
-        return [];
+      if (!userId) {
+        throw new Error('User ID is required to get files');
       }
       
-      // Debug: Let's see what source_file values exist
-      const allSourceFiles = await this.contactRepo
-        .createQueryBuilder('contact')
-        .select('contact.source_file')
-        .where('contact.user_id = :userId', { userId })
-        .andWhere('contact.source_file IS NOT NULL')
-        .getRawMany();
-        
-      console.log('All source files:', allSourceFiles);
+      // Get files with counts using direct SQL
+      const query = `
+        SELECT source_file as filename, COUNT(*) as count
+        FROM contacts
+        WHERE user_id = $1 AND source_file IS NOT NULL
+        GROUP BY source_file
+      `;
       
-      // Get unique filenames and count in a single query
-      const files = await this.contactRepo
-        .createQueryBuilder('contact')
-        .select('contact.source_file', 'filename')
-        .addSelect('COUNT(contact.id)', 'count')
-        .where('contact.user_id = :userId', { userId })
-        .andWhere('contact.source_file IS NOT NULL')
-        .groupBy('contact.source_file')
-        .getRawMany();
-
-      console.log('Files with counts:', files);
+      const result = await this.contactRepo.query(query, [userId]);
       
-      // If no files found but we have contacts, try a simpler query
-      if (files.length === 0 && contactCount > 0) {
-        console.log('No files found with grouped query, trying direct approach');
-        
-        // Get all distinct source files using query builder
-        const distinctFiles = await this.contactRepo
-          .createQueryBuilder('contact')
-          .select('DISTINCT contact.source_file', 'source_file')
-          .where('contact.user_id = :userId', { userId })
-          .andWhere('contact.source_file IS NOT NULL')
-          .getRawMany();
-        
-        console.log('Distinct files:', distinctFiles);
-        
-        // For each distinct file, count the contacts
-        const result = [];
-        for (const file of distinctFiles) {
-          if (file.source_file) {
-            const count = await this.getContactCountByFile(userId, file.source_file);
-            result.push({
-              filename: file.source_file,
-              count
-            });
-          }
-        }
-        
-        console.log('Files with counts (alternative method):', result);
-        return result;
-      }
-      
-      // Convert to expected format with proper typing
-      return files.map(f => ({
+      // Format the result
+      return result.map(f => ({
         filename: f.filename,
         count: parseInt(f.count, 10) || 0
       }));
@@ -179,6 +141,12 @@ export class ContactsService {
     const results = [];
     const phoneNumbers = new Set();
     const fileExt = filename.split('.').pop()?.toLowerCase();
+
+    // Handle missing user
+    if (!user || !user.id) {
+      console.warn('Warning: User is undefined or missing ID in processContactsFile.');
+      throw new Error('User ID is required to process contacts file');
+    }
 
     if (!fileExt || !['csv', 'txt', 'xls', 'xlsx'].includes(fileExt)) {
       throw new Error(`Unsupported file type: ${fileExt || 'unknown'}. Please upload CSV, TXT, XLS, or XLSX files.`);

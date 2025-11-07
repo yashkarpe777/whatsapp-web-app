@@ -27,6 +27,8 @@ export class AuthController {
   @Get('verify')
   @UseGuards(JwtAuthGuard)
   async verify(@Request() req) {
-    return this.authService.verifyToken(req.user.sub);
+    console.log('Verify endpoint - User:', req.user);
+    return this.authService.verifyToken(req.user.id);
   }
+  
 }

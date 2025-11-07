@@ -36,6 +36,7 @@ const Contacts = () => {
   const [contactFiles, setContactFiles] = useState<ContactFile[]>([]);
   const [search, setSearch] = useState("");
   const [loading, setLoading] = useState(false);
+  const [loadingFiles, setLoadingFiles] = useState(false);
   const [totalContacts, setTotalContacts] = useState(0);
   const [activeContacts, setActiveContacts] = useState(0);
   const [fileCount, setFileCount] = useState(0);
@@ -60,11 +61,59 @@ const Contacts = () => {
     fetchContactFiles();
   }, []);
   
-  // Update statistics
+  // Fetch files when dialog opens
+  useEffect(() => {
+    if (openFileDialog) {
+      console.log('Dialog opened, fetching file data...');
+      fetchContactFiles();
+    }
+  }, [openFileDialog]);
+  
+  // Update statistics whenever contacts change
   useEffect(() => {
     setTotalContacts(contacts.length);
     setActiveContacts(contacts.filter(c => c.is_active).length);
+    console.log(`Updated contact stats: ${contacts.length} total, ${contacts.filter(c => c.is_active).length} active`);
   }, [contacts]);
+  
+  // Update file count when contactFiles changes
+  useEffect(() => {
+    // Count all files, not just those with contacts
+    setFileCount(contactFiles.length);
+    console.log(`Updated file count: ${contactFiles.length} total files`);
+  }, [contactFiles]);
+  
+  // Force refresh of data on component mount
+  useEffect(() => {
+    const initialLoad = async () => {
+      console.log('Initial data load');
+      await fetchContacts();
+      await fetchContactFiles();
+    };
+    
+    initialLoad();
+  }, []);
+  
+  // Periodically refresh file count
+  useEffect(() => {
+    // Refresh file count every 30 seconds
+    const intervalId = setInterval(async () => {
+      console.log('Auto-refreshing file count...');
+      try {
+        const updatedFiles = await contactsAPI.getFiles(`?t=${new Date().getTime()}`);
+        if (Array.isArray(updatedFiles) && 
+            updatedFiles.length !== contactFiles.length) {
+          console.log(`File count changed: ${contactFiles.length} -> ${updatedFiles.length}`);
+          setContactFiles(updatedFiles);
+          setFileCount(updatedFiles.length);
+        }
+      } catch (err) {
+        console.error('Error auto-refreshing file count:', err);
+      }
+    }, 30000); // 30 seconds
+    
+    return () => clearInterval(intervalId);
+  }, [contactFiles.length]);
   
   const fetchContacts = async () => {
     try {
@@ -86,18 +135,36 @@ const Contacts = () => {
   
   const fetchContactFiles = async () => {
     try {
+      // Only set loading state if we're not already loading
+      if (!loadingFiles) {
+        setLoadingFiles(true);
+      }
+      
       console.log('Fetching contact files...');
-      const data = await contactsAPI.getFiles();
-      console.log('Received contact files:', data);
+      
+      // Add a timestamp to prevent caching
+      const timestamp = new Date().getTime();
+      const data = await contactsAPI.getFiles(`?t=${timestamp}`);
       
       // Make sure we have valid data
       if (Array.isArray(data)) {
-        setContactFiles(data);
+        console.log(`Received ${data.length} contact files:`, data);
         
-        // Update the contact files count in the stats
-        const filesWithContacts = data.filter(file => file.count > 0);
-        console.log('Files with contacts:', filesWithContacts);
-        setFileCount(filesWithContacts.length);
+        // Only update state if the data has actually changed
+        const currentFilenames = contactFiles.map(f => f.filename).sort().join(',');
+        const newFilenames = data.map(f => f.filename).sort().join(',');
+        
+        if (currentFilenames !== newFilenames || 
+            contactFiles.length !== data.length) {
+          console.log('Contact files have changed, updating state');
+          setContactFiles(data);
+          
+          // Update the contact files count in the stats - show all files
+          console.log(`Found ${data.length} total files`);
+          setFileCount(data.length);
+        } else {
+          console.log('Contact files unchanged, no state update needed');
+        }
       } else {
         console.error('Received invalid data format for contact files:', data);
         setContactFiles([]);
@@ -112,6 +179,8 @@ const Contacts = () => {
       });
       setContactFiles([]);
       setFileCount(0);
+    } finally {
+      setLoadingFiles(false);
     }
   };
   
@@ -160,8 +229,17 @@ const Contacts = () => {
       
       setOpenUploadDialog(false);
       setUploadFile(null);
-      fetchContacts();
-      fetchContactFiles();
+      
+      // Refresh data and update file count immediately
+      await fetchContacts();
+      await fetchContactFiles();
+      
+      // Force an immediate update of the file count
+      const updatedFiles = await contactsAPI.getFiles(`?t=${new Date().getTime()}`);
+      if (Array.isArray(updatedFiles)) {
+        console.log(`Immediate file count update: ${updatedFiles.length} files`);
+        setFileCount(updatedFiles.length);
+      }
     } catch (err: any) {
       console.error('Upload error:', err);
       toast({
@@ -196,7 +274,12 @@ const Contacts = () => {
     if (!fileToDelete) return;
     
     try {
+      setLoadingFiles(true);
+      console.log(`Deleting file ${fileToDelete} and all associated contacts...`);
+      
       const result = await contactsAPI.removeContactsByFile(fileToDelete);
+      
+      console.log(`Deletion result:`, result);
       
       toast({
         title: "File deleted",
@@ -209,16 +292,34 @@ const Contacts = () => {
       setSelectedFile(null);
       setFileContacts([]);
       
-      // Refresh data
-      await fetchContacts();
-      await fetchContactFiles();
-      
-      // If the file dialog is still open, show the file list
-      if (openFileDialog) {
-        setSelectedFile(null);
-      }
+      // Refresh data with a slight delay to ensure backend has processed everything
+      setTimeout(async () => {
+        try {
+          // First refresh contacts
+          await fetchContacts();
+          
+          // Then refresh files
+          await fetchContactFiles();
+          
+          // Force an immediate update of the file count with a third request
+          // This ensures the UI is updated even if the backend is slow
+          const updatedFiles = await contactsAPI.getFiles(`?t=${new Date().getTime()}`);
+          if (Array.isArray(updatedFiles)) {
+            console.log(`Immediate file count update after deletion: ${updatedFiles.length} files`);
+            setFileCount(updatedFiles.length);
+            
+            // Also update the contact files list
+            setContactFiles(updatedFiles);
+          }
+        } catch (refreshError) {
+          console.error('Error refreshing data after deletion:', refreshError);
+        } finally {
+          setLoadingFiles(false);
+        }
+      }, 500);
     } catch (err: any) {
       console.error('Delete file error:', err);
+      setLoadingFiles(false);
       toast({
         title: "Error",
         description: err?.response?.data?.message || "Failed to delete contacts.",
@@ -306,7 +407,10 @@ const Contacts = () => {
             <Button 
               variant="outline" 
               className="flex-1 sm:flex-none"
-              onClick={() => setOpenFileDialog(true)}
+              onClick={() => {
+                setOpenFileDialog(true);
+                fetchContactFiles();
+              }}
             >
               <FileText className="h-4 w-4 mr-2" />
               Manage Files
@@ -345,14 +449,30 @@ const Contacts = () => {
             </div>
           </div>
           <div className="rounded-lg border border-border bg-card p-6">
-            <div className="flex items-center gap-4">
-              <div className="rounded-lg bg-warning/10 p-3">
-                <FileText className="h-6 w-6 text-warning" />
+            <div className="flex items-center justify-between">
+              <div className="flex items-center gap-4">
+                <div className="rounded-lg bg-warning/10 p-3">
+                  <FileText className="h-6 w-6 text-warning" />
+                </div>
+                <div>
+                  <p className="text-sm font-medium text-muted-foreground">Contact Files</p>
+                  <h3 className="text-2xl font-bold text-foreground">{fileCount}</h3>
+                </div>
               </div>
-              <div>
-                <p className="text-sm font-medium text-muted-foreground">Contact Files</p>
-                <h3 className="text-2xl font-bold text-foreground">{fileCount}</h3>
-              </div>
+              <button 
+                className="text-muted-foreground hover:text-foreground p-1 rounded-full hover:bg-accent/50 transition-colors"
+                onClick={async () => {
+                  console.log('Refreshing file count...');
+                  await fetchContactFiles();
+                  const updatedFiles = await contactsAPI.getFiles(`?t=${new Date().getTime()}`);
+                  if (Array.isArray(updatedFiles)) {
+                    setFileCount(updatedFiles.length);
+                  }
+                }}
+                title="Refresh file count"
+              >
+                <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M21 12a9 9 0 0 0-9-9 9.75 9.75 0 0 0-6.74 2.74L3 8"></path><path d="M3 3v5h5"></path><path d="M3 12a9 9 0 0 0 9 9 9.75 9.75 0 0 0 6.74-2.74L21 16"></path><path d="M16 21h5v-5"></path></svg>
+              </button>
             </div>
           </div>
         </div>
@@ -393,7 +513,7 @@ const Contacts = () => {
               {loading ? (
                 <TableRow>
                   <TableCell colSpan={5} className="text-center py-8">
-                    Loading contacts...
+                    Loading contacts...v
                   </TableCell>
                 </TableRow>
               ) : filteredContacts.length === 0 ? (
@@ -502,7 +622,12 @@ const Contacts = () => {
       </Dialog>
 
       {/* Manage Files Dialog */}
-      <Dialog open={openFileDialog} onOpenChange={setOpenFileDialog}>
+      <Dialog open={openFileDialog} onOpenChange={(open) => {
+        // Only update if we're closing the dialog
+        if (!open) {
+          setOpenFileDialog(false);
+        }
+      }}>
         <DialogContent className="max-w-3xl">
           <DialogHeader>
             <div className="flex justify-between items-center">
@@ -516,9 +641,19 @@ const Contacts = () => {
                 variant="outline" 
                 size="sm" 
                 onClick={() => fetchContactFiles()}
+                disabled={loadingFiles}
               >
-                <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="mr-1"><path d="M21 12a9 9 0 0 0-9-9 9.75 9.75 0 0 0-6.74 2.74L3 8"></path><path d="M3 3v5h5"></path><path d="M3 12a9 9 0 0 0 9 9 9.75 9.75 0 0 0 6.74-2.74L21 16"></path><path d="M16 21h5v-5"></path></svg>
-                Refresh Files
+                {loadingFiles ? (
+                  <>
+                    <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-primary mr-1"></div>
+                    Refreshing...
+                  </>
+                ) : (
+                  <>
+                    <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="mr-1"><path d="M21 12a9 9 0 0 0-9-9 9.75 9.75 0 0 0-6.74 2.74L3 8"></path><path d="M3 3v5h5"></path><path d="M3 12a9 9 0 0 0 9 9 9.75 9.75 0 0 0 6.74-2.74L21 16"></path><path d="M16 21h5v-5"></path></svg>
+                    Refresh Files
+                  </>
+                )}
               </Button>
             </div>
           </DialogHeader>
@@ -597,7 +732,14 @@ const Contacts = () => {
               </div>
             ) : (
               <div className="space-y-4">
-                {contactFiles.length === 0 ? (
+                {loadingFiles ? (
+                  <div className="text-center py-8">
+                    <div className="flex flex-col items-center gap-2">
+                      <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-primary"></div>
+                      <p className="text-muted-foreground">Loading contact files...</p>
+                    </div>
+                  </div>
+                ) : contactFiles.length === 0 ? (
                   <div className="text-center py-8">
                     <p className="text-muted-foreground">No contact files found.</p>
                     <div className="flex flex-col gap-2 mt-4 items-center">

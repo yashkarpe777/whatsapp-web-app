@@ -7,6 +7,7 @@ import { Plus, Search, Filter, Megaphone } from "lucide-react";
 import { campaignsAPI } from "@/services/api";
 import { useToast } from "@/hooks/use-toast";
 import CreateCampaignModal from "@/components/CreateCampaignModal";
+import { useLocation, useNavigate } from "react-router-dom";
 
 const Campaigns = () => {
   const [campaigns, setCampaigns] = useState([]);
@@ -18,6 +19,22 @@ const Campaigns = () => {
   const [page, setPage] = useState(1);
   const [hasMore, setHasMore] = useState(true);
   const itemsPerPage = 12;
+  
+  // Get query parameters to check if we should open the create dialog
+  const location = useLocation();
+  const navigate = useNavigate();
+  
+  // Check if we should open the create dialog based on query parameter
+  useEffect(() => {
+    const searchParams = new URLSearchParams(location.search);
+    const shouldOpenCreate = searchParams.get('create') === 'true';
+    
+    if (shouldOpenCreate) {
+      setOpenCreate(true);
+      // Remove the query parameter to avoid reopening on refresh
+      navigate('/campaigns', { replace: true });
+    }
+  }, [location, navigate]);
 
   const fetchCampaigns = async (pageNum = 1, append = false) => {
     try {

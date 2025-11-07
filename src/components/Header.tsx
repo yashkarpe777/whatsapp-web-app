@@ -2,7 +2,6 @@ import { Send, User, Moon, Sun, Settings, LogOut } from "lucide-react";
 import { Link, useNavigate } from "react-router-dom";
 import { useTheme } from "next-themes";
 import { useEffect, useState } from "react";
-import { SidebarTrigger } from "@/components/ui/sidebar";
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -36,7 +35,6 @@ export const Header = () => {
   return (
     <header className="sticky top-0 z-50 flex h-16 items-center justify-between border-b border-border bg-background/80 px-4 backdrop-blur-sm sm:px-6">
       <div className="flex items-center gap-3">
-        <SidebarTrigger />
         <Link to="/" className="flex items-center gap-2">
           <Send className="h-7 w-7 text-primary" />
           <h1 className="text-xl font-bold text-foreground">Campaigner</h1>

@@ -37,13 +37,12 @@ export class ContactsController {
   findAll(@Req() req) {
     return this.contactsService.findAll(req.user.id);
   }
+  
 
   @Get('files')
   async getFiles(@Req() req) {
     try {
-      // The service now returns files with counts directly
       const files = await this.contactsService.getUniqueFiles(req.user.id);
-      console.log('Returning files to client:', files);
       return files;
     } catch (error) {
       console.error('Error in getFiles controller:', error);
@@ -106,6 +105,12 @@ export class ContactsController {
       
       console.log(`File uploaded: ${file.originalname}, size: ${file.size} bytes, saved as: ${file.filename}`);
       console.log(`File path: ${file.path}`);
+      
+      // Check if user is available in the request
+      if (!req.user) {
+        console.warn('Warning: User not found in request during file upload. Authentication may not be working properly.');
+        throw new BadRequestException('User authentication required for file upload');
+      }
       
       const result = await this.contactsService.processContactsFile(
         file.path,
