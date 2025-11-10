@@ -3,7 +3,7 @@ import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
 import { JwtService } from '@nestjs/jwt';
 import * as bcrypt from 'bcrypt';
-import { User } from './entities/user.entity';
+import { User, UserStatus } from './entities/user.entity';
 import { LoginDto } from './dto/login.dto';
 import { RegisterDto } from './dto/register.dto';
 
@@ -71,7 +71,9 @@ export class AuthService {
       username: registerDto.username,
       email: registerDto.email,
       passwordHash,
-      role: 'user',
+      role: registerDto.role || 'user',
+      credits: registerDto.credits || 0,
+      status: registerDto.status || UserStatus.ACTIVE,
     });
 
     await this.userRepository.save(user);
@@ -85,6 +87,8 @@ export class AuthService {
         username: user.username,
         email: user.email,
         role: user.role,
+        credits: user.credits,
+        status: user.status,
       },
       token,
     };

@@ -3,6 +3,8 @@ import { AuthService } from './auth.service';
 import { LoginDto } from './dto/login.dto';
 import { RegisterDto } from './dto/register.dto';
 import { JwtAuthGuard } from './guards/jwt-auth.guard';
+import { RolesGuard } from './guards/roles.guard';
+import { Roles } from './decorators/roles.decorator';
 
 @Controller('api/auth')
 export class AuthController {
@@ -15,6 +17,16 @@ export class AuthController {
 
   @Post('register')
   async register(@Body() registerDto: RegisterDto) {
+    // Public registration is limited to regular users
+    const userDto = { ...registerDto, role: 'user' };
+    return this.authService.register(userDto);
+  }
+  
+  @Post('admin/register')
+  @UseGuards(JwtAuthGuard, RolesGuard)
+  @Roles('admin')
+  async registerByAdmin(@Body() registerDto: RegisterDto, @Request() req) {
+    console.log(`Admin ${req.user.username} creating new user`);
     return this.authService.register(registerDto);
   }
 

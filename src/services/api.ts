@@ -54,7 +54,9 @@ export interface AuthResponse {
     id: string;
     username: string;
     email: string;
-    role?: string;
+    role: string;
+    credits?: number;
+    status?: string;
   };
   token: string;
 }
@@ -79,7 +81,6 @@ export const authAPI = {
     }
   },
   
-
   logout: async (): Promise<void> => {
     try {
       await api.post('/auth/logout');
@@ -94,6 +95,105 @@ export const authAPI = {
       return response.data;
     } catch (error: any) {
       throw new Error(error.response?.data?.message || 'Token verification failed');
+    }
+  },
+};
+
+// User profile management API
+export interface UpdateUserRequest {
+  username?: string;
+  password?: string;
+  currentPassword?: string;
+}
+
+export interface UserProfile {
+  id: string;
+  username: string;
+  email: string;
+  role: string;
+  credits?: number;
+  status?: string;
+  createdAt?: string;
+}
+
+export const userAPI = {
+  getProfile: async (): Promise<UserProfile> => {
+    try {
+      const response = await api.get<UserProfile>('/users/profile');
+      return response.data;
+    } catch (error: any) {
+      throw new Error(error.response?.data?.message || 'Failed to fetch profile');
+    }
+  },
+
+  updateProfile: async (data: UpdateUserRequest): Promise<UserProfile> => {
+    try {
+      const response = await api.put<UserProfile>('/users/update', data);
+      return response.data;
+    } catch (error: any) {
+      throw new Error(error.response?.data?.message || 'Failed to update profile');
+    }
+  },
+};
+
+// Admin API for user management
+export interface CreditTransferRequest {
+  userId: number;
+  amount: number;
+}
+
+export const adminAPI = {
+  getAllUsers: async (): Promise<UserProfile[]> => {
+    try {
+      const response = await api.get<UserProfile[]>('/admin/users');
+      return response.data;
+    } catch (error: any) {
+      throw new Error(error.response?.data?.message || 'Failed to fetch users');
+    }
+  },
+
+  getUserById: async (id: string): Promise<UserProfile> => {
+    try {
+      const response = await api.get<UserProfile>(`/admin/users/${id}`);
+      return response.data;
+    } catch (error: any) {
+      throw new Error(error.response?.data?.message || 'Failed to fetch user');
+    }
+  },
+
+  updateUserStatus: async (id: string, status: string): Promise<any> => {
+    try {
+      const response = await api.put(`/admin/users/${id}/status`, { status });
+      return response.data;
+    } catch (error: any) {
+      throw new Error(error.response?.data?.message || 'Failed to update user status');
+    }
+  },
+
+  transferCredits: async (data: CreditTransferRequest): Promise<any> => {
+    try {
+      const response = await api.post('/admin/credits/transfer', data);
+      return response.data;
+    } catch (error: any) {
+      throw new Error(error.response?.data?.message || 'Failed to transfer credits');
+    }
+  },
+
+  getCreditsInfo: async (): Promise<any> => {
+    try {
+      const response = await api.get('/admin/credits');
+      return response.data;
+    } catch (error: any) {
+      throw new Error(error.response?.data?.message || 'Failed to fetch credits info');
+    }
+  },
+
+  registerUser: async (userData: RegisterCredentials): Promise<AuthResponse> => {
+    try {
+      const response = await api.post<AuthResponse>('/auth/admin/register', userData);
+      return response.data;
+    } catch (error: any) {
+      throw new Error(error.response?.data?.message || 'Failed to register user');
     }
   },
 };

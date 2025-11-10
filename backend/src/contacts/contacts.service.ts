@@ -7,9 +7,9 @@ import { UpdateContactDto } from './dto/update-contact.dto';
 import { User } from '../auth/entities/user.entity';
 import * as fs from 'fs';
 import * as path from 'path';
-// Use require for csv-parser since it doesn't have TypeScript types
+
 const csv = require('csv-parser');
-// Use xlsx for Excel files
+
 import * as XLSX from 'xlsx';
 
 @Injectable()
