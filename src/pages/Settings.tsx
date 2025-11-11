@@ -1,128 +1,624 @@
+import { useEffect, useMemo, useState, ChangeEvent } from "react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Switch } from "@/components/ui/switch";
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
-import { Save } from "lucide-react";
+import { Badge } from "@/components/ui/badge";
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+  DialogTrigger,
+} from "@/components/ui/dialog";
+import { useToast } from "@/hooks/use-toast";
+import {
+  numbersAPI,
+  VirtualNumber,
+  VirtualNumberQuality,
+  VirtualNumberStatus,
+  CreateVirtualNumberPayload,
+} from "@/services/api";
+import { Building2, Loader2, Phone, Plus, RefreshCcw } from "lucide-react";
+
+const STATUS_STYLES: Record<VirtualNumberStatus, string> = {
+  active: "bg-green-100 text-green-800 border-green-200",
+  restricted: "bg-yellow-100 text-yellow-800 border-yellow-200",
+  throttled: "bg-amber-100 text-amber-800 border-amber-200",
+  banned: "bg-red-100 text-red-800 border-red-200",
+  disconnected: "bg-slate-200 text-slate-900 border-slate-300",
+};
+
+const QUALITY_STYLES: Record<VirtualNumberQuality, string> = {
+  high: "bg-emerald-100 text-emerald-800 border-emerald-200",
+  medium: "bg-blue-100 text-blue-800 border-blue-200",
+  low: "bg-orange-100 text-orange-800 border-orange-200",
+  unknown: "bg-slate-100 text-slate-700 border-slate-200",
+};
+
+type BusinessFormState = {
+  businessName: string;
+  wabaId: string;
+  phoneNumberId: string;
+  displayPhoneNumber: string;
+  accessToken: string;
+  autoSwitchEnabled: boolean;
+};
+
+const DEFAULT_BUSINESS_FORM: BusinessFormState = {
+  businessName: "",
+  wabaId: "",
+  phoneNumberId: "",
+  displayPhoneNumber: "",
+  accessToken: "",
+  autoSwitchEnabled: true,
+};
+
+const DEFAULT_NEW_NUMBER: CreateVirtualNumberPayload = {
+  wabaId: "",
+  phoneNumberId: "",
+  accessToken: "",
+  status: "active",
+  qualityRating: "unknown",
+  isPrimary: false,
+};
 
 const Settings = () => {
+  const { toast } = useToast();
+
+  const [businessForm, setBusinessForm] = useState<BusinessFormState>(DEFAULT_BUSINESS_FORM);
+  const [businessLoading, setBusinessLoading] = useState(true);
+  const [businessSaving, setBusinessSaving] = useState(false);
+
+  const [virtualNumbers, setVirtualNumbers] = useState<VirtualNumber[]>([]);
+  const [numbersLoading, setNumbersLoading] = useState(true);
+  const [numbersRefreshing, setNumbersRefreshing] = useState(false);
+  const [switching, setSwitching] = useState(false);
+  const [updatingPrimaryId, setUpdatingPrimaryId] = useState<number | null>(null);
+
+  const [showAddDialog, setShowAddDialog] = useState(false);
+  const [newNumberForm, setNewNumberForm] = useState<CreateVirtualNumberPayload>(DEFAULT_NEW_NUMBER);
+  const [creatingNumber, setCreatingNumber] = useState(false);
+
+  const [activeTab, setActiveTab] = useState<"business" | "virtual">("business");
+
+  const primaryNumber = useMemo(() => virtualNumbers.find((item) => item.isPrimary), [virtualNumbers]);
+
+  useEffect(() => {
+    void loadBusiness();
+    void loadNumbers();
+  }, []);
+
+  const loadBusiness = async () => {
+    setBusinessLoading(true);
+    try {
+      const data = await numbersAPI.getBusinessNumber();
+      if (data) {
+        setBusinessForm({
+          businessName: data.businessName || "",
+          wabaId: data.wabaId,
+          phoneNumberId: data.phoneNumberId,
+          displayPhoneNumber: data.displayPhoneNumber || "",
+          accessToken: data.accessToken,
+          autoSwitchEnabled: data.autoSwitchEnabled,
+        });
+      } else {
+        setBusinessForm(DEFAULT_BUSINESS_FORM);
+      }
+    } catch (error: any) {
+      toast({
+        title: "Failed to load business number",
+        description: error.message || "Unable to fetch business number",
+        variant: "destructive",
+      });
+    } finally {
+      setBusinessLoading(false);
+    }
+  };
+
+  const loadNumbers = async (showSpinner = true) => {
+    if (showSpinner) {
+      setNumbersLoading(true);
+    } else {
+      setNumbersRefreshing(true);
+    }
+
+    try {
+      const data = await numbersAPI.getVirtualNumbers();
+      setVirtualNumbers(data);
+    } catch (error: any) {
+      toast({
+        title: "Failed to load virtual numbers",
+        description: error.message || "Unable to fetch virtual numbers",
+        variant: "destructive",
+      });
+    } finally {
+      setNumbersLoading(false);
+      setNumbersRefreshing(false);
+    }
+  };
+
+  const handleBusinessChange = (event: ChangeEvent<HTMLInputElement>) => {
+    const { name, value } = event.target;
+    setBusinessForm((prev) => ({ ...prev, [name]: value }));
+  };
+
+  const handleSaveBusiness = async () => {
+    if (!businessForm.wabaId || !businessForm.phoneNumberId || !businessForm.accessToken) {
+      toast({
+        title: "Missing information",
+        description: "WABA ID, Phone Number ID and Access Token are required",
+        variant: "destructive",
+      });
+      return;
+    }
+
+    setBusinessSaving(true);
+    try {
+      const updated = await numbersAPI.updateBusinessNumber({
+        businessName: businessForm.businessName || undefined,
+        wabaId: businessForm.wabaId,
+        phoneNumberId: businessForm.phoneNumberId,
+        displayPhoneNumber: businessForm.displayPhoneNumber || undefined,
+        accessToken: businessForm.accessToken,
+        autoSwitchEnabled: businessForm.autoSwitchEnabled,
+      });
+
+      setBusinessForm({
+        businessName: updated.businessName || "",
+        wabaId: updated.wabaId,
+        phoneNumberId: updated.phoneNumberId,
+        displayPhoneNumber: updated.displayPhoneNumber || "",
+        accessToken: updated.accessToken,
+        autoSwitchEnabled: updated.autoSwitchEnabled,
+      });
+
+      toast({ title: "Business number saved", description: "Configuration updated successfully." });
+    } catch (error: any) {
+      toast({
+        title: "Save failed",
+        description: error.message || "Unable to update business number",
+        variant: "destructive",
+      });
+    } finally {
+      setBusinessSaving(false);
+    }
+  };
+
+  const handleManualSwitch = async () => {
+    setSwitching(true);
+    try {
+      const switched = await numbersAPI.manualSwitch();
+      toast({ title: "Primary switched", description: `Now using ${switched.phoneNumberId}` });
+      await loadNumbers();
+    } catch (error: any) {
+      toast({
+        title: "Switch failed",
+        description: error.message || "Unable to switch virtual number",
+        variant: "destructive",
+      });
+    } finally {
+      setSwitching(false);
+    }
+  };
+
+  const handleSetPrimary = async (id: number) => {
+    setUpdatingPrimaryId(id);
+    try {
+      await numbersAPI.updateVirtualNumber(id, { isPrimary: true });
+      toast({ title: "Primary updated" });
+      await loadNumbers();
+    } catch (error: any) {
+      toast({
+        title: "Update failed",
+        description: error.message || "Unable to set primary number",
+        variant: "destructive",
+      });
+    } finally {
+      setUpdatingPrimaryId(null);
+    }
+  };
+
+  const handleAddNumberChange = (event: ChangeEvent<HTMLInputElement | HTMLSelectElement>) => {
+    const { name, value } = event.target;
+    setNewNumberForm((prev) => ({ ...prev, [name]: value as any }));
+  };
+
+  const handleCreateNumber = async () => {
+    if (!newNumberForm.wabaId || !newNumberForm.phoneNumberId || !newNumberForm.accessToken) {
+      toast({
+        title: "Missing information",
+        description: "WABA ID, Phone Number ID and Access Token are required",
+        variant: "destructive",
+      });
+      return;
+    }
+
+    setCreatingNumber(true);
+    try {
+      await numbersAPI.createVirtualNumber(newNumberForm);
+      toast({ title: "Number added", description: `${newNumberForm.phoneNumberId} is now available.` });
+      setShowAddDialog(false);
+      setNewNumberForm(DEFAULT_NEW_NUMBER);
+      await loadNumbers();
+    } catch (error: any) {
+      toast({
+        title: "Create failed",
+        description: error.message || "Unable to create virtual number",
+        variant: "destructive",
+      });
+    } finally {
+      setCreatingNumber(false);
+    }
+  };
+
+  const lastUsedLabel = primaryNumber?.lastUsedAt
+    ? new Date(primaryNumber.lastUsedAt).toLocaleString()
+    : "No recent usage";
+
   return (
     <div className="min-h-screen bg-background p-6">
       <main className="space-y-6">
-        <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
-          <h1 className="text-3xl font-bold text-foreground">Settings</h1>
-          <Button>
-            <Save className="h-5 w-5 mr-2" />
-            Save Changes
-          </Button>
+        <div className="space-y-4">
+          <div>
+            <h1 className="text-3xl font-bold text-foreground">Settings</h1>
+            <p className="text-sm text-muted-foreground">
+              Manage your WhatsApp business number and virtual number pool.
+            </p>
+          </div>
+          <div className="flex flex-wrap items-center justify-between gap-3">
+            <div className="flex flex-wrap gap-2">
+              <Button
+                onClick={() => setActiveTab("business")}
+                variant={activeTab === "business" ? "default" : "outline"}
+                className="flex items-center gap-2"
+              >
+                <Building2 className="h-4 w-4" />
+                Business
+              </Button>
+              <Button
+                onClick={() => setActiveTab("virtual")}
+                variant={activeTab === "virtual" ? "default" : "outline"}
+                className="flex items-center gap-2"
+              >
+                <Phone className="h-4 w-4" />
+                Virtual Numbers
+              </Button>
+            </div>
+            <Button
+              variant="outline"
+              onClick={() => {
+                void loadBusiness();
+                void loadNumbers();
+              }}
+              disabled={businessLoading || numbersLoading}
+            >
+              <RefreshCcw className="mr-2 h-4 w-4" /> Refresh
+            </Button>
+          </div>
         </div>
 
-        <div className="grid gap-6 md:grid-cols-2">
-          {/* API Configuration */}
-          <Card>
-            <CardHeader>
-              <CardTitle>WhatsApp API Configuration</CardTitle>
-              <CardDescription>Configure your Meta WhatsApp Business API credentials</CardDescription>
-            </CardHeader>
-            <CardContent className="space-y-4">
-              <div className="space-y-2">
-                <Label htmlFor="waba-id">WABA ID</Label>
-                <Input id="waba-id" placeholder="Enter your WhatsApp Business Account ID" />
-              </div>
-              <div className="space-y-2">
-                <Label htmlFor="phone-id">Phone Number ID</Label>
-                <Input id="phone-id" placeholder="Enter your Phone Number ID" />
-              </div>
-              <div className="space-y-2">
-                <Label htmlFor="access-token">Access Token</Label>
-                <Input id="access-token" type="password" placeholder="Enter your permanent access token" />
-              </div>
-            </CardContent>
-          </Card>
+        {activeTab === "business" ? (
+          <div className="space-y-6">
+            <Card className="min-h-[420px]">
+              <CardHeader>
+                <CardTitle>Business Number</CardTitle>
+                <CardDescription>
+                  Configure the primary number used for outbound messaging.
+                </CardDescription>
+              </CardHeader>
+              <CardContent className="space-y-5">
+                {businessLoading ? (
+                  <div className="flex items-center gap-2 text-muted-foreground">
+                    <Loader2 className="h-4 w-4 animate-spin" /> Loading business number...
+                  </div>
+                ) : (
+                  <>
+                    <div className="grid gap-4">
+                      <div className="grid gap-2">
+                        <Label htmlFor="businessName">Business Name</Label>
+                        <Input
+                          id="businessName"
+                          name="businessName"
+                          placeholder="Campaigner Inc."
+                          value={businessForm.businessName}
+                          onChange={handleBusinessChange}
+                        />
+                      </div>
+                      <div className="grid gap-2">
+                        <Label htmlFor="wabaId">WABA ID</Label>
+                        <Input
+                          id="wabaId"
+                          name="wabaId"
+                          placeholder="Enter WhatsApp Business Account ID"
+                          value={businessForm.wabaId}
+                          onChange={handleBusinessChange}
+                        />
+                      </div>
+                      <div className="grid gap-2">
+                        <Label htmlFor="phoneNumberId">Phone Number ID</Label>
+                        <Input
+                          id="phoneNumberId"
+                          name="phoneNumberId"
+                          placeholder="Enter Phone Number ID"
+                          value={businessForm.phoneNumberId}
+                          onChange={handleBusinessChange}
+                        />
+                      </div>
+                      <div className="grid gap-2">
+                        <Label htmlFor="displayPhoneNumber">Display Phone Number (optional)</Label>
+                        <Input
+                          id="displayPhoneNumber"
+                          name="displayPhoneNumber"
+                          placeholder="+1 555 0100"
+                          value={businessForm.displayPhoneNumber}
+                          onChange={handleBusinessChange}
+                        />
+                      </div>
+                      <div className="grid gap-2">
+                        <Label htmlFor="accessToken">Access Token</Label>
+                        <Input
+                          id="accessToken"
+                          name="accessToken"
+                          type="password"
+                          placeholder="Enter permanent access token"
+                          value={businessForm.accessToken}
+                          onChange={handleBusinessChange}
+                        />
+                      </div>
+                    </div>
 
-          {/* Notification Settings */}
-          <Card>
-            <CardHeader>
-              <CardTitle>Notification Preferences</CardTitle>
-              <CardDescription>Configure how you want to receive updates</CardDescription>
-            </CardHeader>
-            <CardContent className="space-y-4">
-              <div className="flex items-center justify-between">
-                <Label htmlFor="campaign-notifications">Campaign Notifications</Label>
-                <Switch id="campaign-notifications" />
-              </div>
-              <div className="flex items-center justify-between">
-                <Label htmlFor="delivery-updates">Delivery Updates</Label>
-                <Switch id="delivery-updates" />
-              </div>
-              <div className="flex items-center justify-between">
-                <Label htmlFor="error-alerts">Error Alerts</Label>
-                <Switch id="error-alerts" />
-              </div>
-            </CardContent>
-          </Card>
+                    <div className="flex items-center justify-between rounded-md border p-4">
+                      <div>
+                        <p className="font-medium">Auto-switch virtual numbers</p>
+                        <p className="text-sm text-muted-foreground">
+                          Automatically promote a healthy number if the primary is degraded.
+                        </p>
+                      </div>
+                      <Switch
+                        checked={businessForm.autoSwitchEnabled}
+                        onCheckedChange={(checked) =>
+                          setBusinessForm((prev) => ({ ...prev, autoSwitchEnabled: checked }))
+                        }
+                      />
+                    </div>
 
-          {/* Regional Settings */}
-          <Card>
-            <CardHeader>
-              <CardTitle>Regional Settings</CardTitle>
-              <CardDescription>Configure your timezone and language preferences</CardDescription>
-            </CardHeader>
-            <CardContent className="space-y-4">
-              <div className="space-y-2">
-                <Label htmlFor="timezone">Timezone</Label>
-                <Select>
-                  <SelectTrigger>
-                    <SelectValue placeholder="Select timezone" />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="utc">UTC</SelectItem>
-                    <SelectItem value="est">EST</SelectItem>
-                    <SelectItem value="pst">PST</SelectItem>
-                    <SelectItem value="ist">IST</SelectItem>
-                  </SelectContent>
-                </Select>
-              </div>
-              <div className="space-y-2">
-                <Label htmlFor="language">Language</Label>
-                <Select>
-                  <SelectTrigger>
-                    <SelectValue placeholder="Select language" />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="en">English</SelectItem>
-                    <SelectItem value="es">Spanish</SelectItem>
-                    <SelectItem value="fr">French</SelectItem>
-                    <SelectItem value="de">German</SelectItem>
-                  </SelectContent>
-                </Select>
-              </div>
-            </CardContent>
-          </Card>
-
-          {/* Message Limits */}
-          <Card>
-            <CardHeader>
-              <CardTitle>Message Limits</CardTitle>
-              <CardDescription>Configure daily message limits and throttling</CardDescription>
-            </CardHeader>
-            <CardContent className="space-y-4">
-              <div className="space-y-2">
-                <Label htmlFor="daily-limit">Daily Message Limit</Label>
-                <Input id="daily-limit" type="number" placeholder="Enter daily limit" />
-              </div>
-              <div className="space-y-2">
-                <Label htmlFor="batch-size">Batch Size</Label>
-                <Input id="batch-size" type="number" placeholder="Messages per batch" />
-              </div>
-              <div className="space-y-2">
-                <Label htmlFor="delay">Delay Between Batches (seconds)</Label>
-                <Input id="delay" type="number" placeholder="Enter delay in seconds" />
-              </div>
-            </CardContent>
-          </Card>
-        </div>
+                    <Button className="w-full sm:w-auto" onClick={handleSaveBusiness} disabled={businessSaving}>
+                      {businessSaving && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
+                      Save Business Number
+                    </Button>
+                  </>
+                )}
+              </CardContent>
+            </Card>
+          </div>
+        ) : (
+          <div className="space-y-6">
+            <Card className="min-h-[420px]">
+              <CardHeader className="space-y-1">
+                <div className="flex items-center justify-between gap-4">
+                  <div>
+                    <CardTitle>Virtual Numbers</CardTitle>
+                    <CardDescription>
+                      Manage active numbers, monitor health, and trigger manual failover.
+                    </CardDescription>
+                  </div>
+                  <div className="flex gap-2">
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      onClick={() => void loadNumbers(false)}
+                      disabled={numbersRefreshing}
+                    >
+                      {numbersRefreshing ? (
+                        <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                      ) : (
+                        <RefreshCcw className="mr-2 h-4 w-4" />
+                      )}
+                      Refresh
+                    </Button>
+                    <Button variant="secondary" size="sm" onClick={handleManualSwitch} disabled={switching}>
+                      {switching ? (
+                        <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                      ) : (
+                        <RefreshCcw className="mr-2 h-4 w-4" />
+                      )}
+                      Manual Switch
+                    </Button>
+                    <Dialog
+                      open={showAddDialog}
+                      onOpenChange={(open) => {
+                        setShowAddDialog(open);
+                        if (!open) setNewNumberForm(DEFAULT_NEW_NUMBER);
+                      }}
+                    >
+                      <DialogTrigger asChild>
+                        <Button size="sm">
+                          <Plus className="mr-2 h-4 w-4" /> Add Number
+                        </Button>
+                      </DialogTrigger>
+                      <DialogContent className="max-h-[90vh] w-full max-w-[92vw] overflow-y-auto sm:max-w-lg">
+                        <DialogHeader>
+                          <DialogTitle>Add Virtual Number</DialogTitle>
+                          <DialogDescription>
+                            Connect an additional number to the virtual pool.
+                          </DialogDescription>
+                        </DialogHeader>
+                        <div className="grid gap-4 py-4">
+                          <div className="space-y-2">
+                            <Label htmlFor="new-waba">WABA ID</Label>
+                            <Input
+                              id="new-waba"
+                              name="wabaId"
+                              value={newNumberForm.wabaId}
+                              onChange={handleAddNumberChange}
+                            />
+                          </div>
+                          <div className="space-y-2">
+                            <Label htmlFor="new-phone">Phone Number ID</Label>
+                            <Input
+                              id="new-phone"
+                              name="phoneNumberId"
+                              value={newNumberForm.phoneNumberId}
+                              onChange={handleAddNumberChange}
+                            />
+                          </div>
+                          <div className="space-y-2">
+                            <Label htmlFor="new-token">Access Token</Label>
+                            <Input
+                              id="new-token"
+                              name="accessToken"
+                              type="password"
+                              value={newNumberForm.accessToken}
+                              onChange={handleAddNumberChange}
+                            />
+                          </div>
+                          <div className="space-y-2">
+                            <Label htmlFor="new-status">Status</Label>
+                            <select
+                              id="new-status"
+                              name="status"
+                              className="flex h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-sm"
+                              value={newNumberForm.status}
+                              onChange={handleAddNumberChange}
+                            >
+                              <option value="active">Active</option>
+                              <option value="restricted">Restricted</option>
+                              <option value="throttled">Throttled</option>
+                              <option value="banned">Banned</option>
+                              <option value="disconnected">Disconnected</option>
+                            </select>
+                          </div>
+                          <div className="space-y-2">
+                            <Label htmlFor="new-quality">Quality Rating</Label>
+                            <select
+                              id="new-quality"
+                              name="qualityRating"
+                              className="flex h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-sm"
+                              value={newNumberForm.qualityRating}
+                              onChange={handleAddNumberChange}
+                            >
+                              <option value="high">High</option>
+                              <option value="medium">Medium</option>
+                              <option value="low">Low</option>
+                              <option value="unknown">Unknown</option>
+                            </select>
+                          </div>
+                          <div className="flex items-center justify-between rounded-md border p-3">
+                            <div>
+                              <p className="text-sm font-medium">Set as primary</p>
+                              <p className="text-xs text-muted-foreground">
+                                Current primary will be replaced immediately.
+                              </p>
+                            </div>
+                            <Switch
+                              checked={Boolean(newNumberForm.isPrimary)}
+                              onCheckedChange={(checked) =>
+                                setNewNumberForm((prev) => ({ ...prev, isPrimary: checked }))
+                              }
+                            />
+                          </div>
+                        </div>
+                        <DialogFooter>
+                          <Button variant="outline" onClick={() => setShowAddDialog(false)} disabled={creatingNumber}>
+                            Cancel
+                          </Button>
+                          <Button onClick={handleCreateNumber} disabled={creatingNumber}>
+                            {creatingNumber && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
+                            Create Number
+                          </Button>
+                        </DialogFooter>
+                      </DialogContent>
+                    </Dialog>
+                  </div>
+                </div>
+                {primaryNumber && (
+                  <p className="text-sm text-muted-foreground">
+                    Current primary: <span className="font-medium">{primaryNumber.phoneNumberId}</span> (last used {lastUsedLabel})
+                  </p>
+                )}
+              </CardHeader>
+              <CardContent>
+                <div className="rounded-md border">
+                  <table className="w-full text-sm">
+                    <thead>
+                      <tr className="border-b bg-muted/50 text-muted-foreground">
+                        <th className="h-10 px-4 text-left font-medium">Number</th>
+                        <th className="h-10 px-4 text-left font-medium">Status</th>
+                        <th className="h-10 px-4 text-left font-medium">Quality</th>
+                        <th className="h-10 px-4 text-left font-medium">24h Messages</th>
+                        <th className="h-10 px-4 text-left font-medium">Last Used</th>
+                        <th className="h-10 px-4 text-left font-medium">Actions</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {numbersLoading ? (
+                        <tr>
+                          <td colSpan={6} className="p-6 text-center text-muted-foreground">
+                            <Loader2 className="mr-2 inline-block h-4 w-4 animate-spin" /> Loading virtual numbers...
+                          </td>
+                        </tr>
+                      ) : virtualNumbers.length === 0 ? (
+                        <tr>
+                          <td colSpan={6} className="p-6 text-center text-muted-foreground">
+                            No virtual numbers found. Add a number to get started.
+                          </td>
+                        </tr>
+                      ) : (
+                        virtualNumbers.map((number) => (
+                          <tr key={number.id} className="border-b">
+                            <td className="p-4">
+                              <div className="flex flex-col">
+                                <span className="font-medium">{number.phoneNumberId}</span>
+                                <span className="text-xs text-muted-foreground">WABA: {number.wabaId}</span>
+                                {number.isPrimary && (
+                                  <Badge variant="outline" className="mt-1">Primary</Badge>
+                                )}
+                              </div>
+                            </td>
+                            <td className="p-4">
+                              <Badge variant="outline" className={STATUS_STYLES[number.status]}>
+                                {number.status}
+                              </Badge>
+                            </td>
+                            <td className="p-4">
+                              <Badge variant="outline" className={QUALITY_STYLES[number.qualityRating]}>
+                                {number.qualityRating}
+                              </Badge>
+                            </td>
+                            <td className="p-4">{number.messageCount24h}</td>
+                            <td className="p-4">
+                              {number.lastUsedAt ? new Date(number.lastUsedAt).toLocaleString() : "—"}
+                            </td>
+                            <td className="p-4">
+                              <Button
+                                size="sm"
+                                variant="outline"
+                                onClick={() => handleSetPrimary(number.id)}
+                                disabled={number.isPrimary || updatingPrimaryId === number.id}
+                              >
+                                {updatingPrimaryId === number.id ? (
+                                  <Loader2 className="h-4 w-4 animate-spin" />
+                                ) : number.isPrimary ? (
+                                  "Primary"
+                                ) : (
+                                  "Set Primary"
+                                )}
+                              </Button>
+                            </td>
+                          </tr>
+                        ))
+                      )}
+                    </tbody>
+                  </table>
+                </div>
+              </CardContent>
+            </Card>
+          </div>
+        )}
       </main>
     </div>
   );

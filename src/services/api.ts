@@ -99,6 +99,106 @@ export const authAPI = {
   },
 };
 
+export type VirtualNumberStatus = 'active' | 'restricted' | 'throttled' | 'banned' | 'disconnected';
+export type VirtualNumberQuality = 'high' | 'medium' | 'low' | 'unknown';
+
+export interface BusinessNumber {
+  id: number;
+  businessName?: string | null;
+  wabaId: string;
+  phoneNumberId: string;
+  displayPhoneNumber?: string | null;
+  accessToken: string;
+  autoSwitchEnabled: boolean;
+  createdAt?: string;
+  updatedAt?: string;
+}
+
+export interface VirtualNumber {
+  id: number;
+  wabaId: string;
+  phoneNumberId: string;
+  accessToken: string;
+  status: VirtualNumberStatus;
+  qualityRating: VirtualNumberQuality;
+  isPrimary: boolean;
+  messageCount24h: number;
+  lastUsedAt?: string | null;
+  createdAt?: string;
+  updatedAt?: string;
+}
+
+export interface CreateVirtualNumberPayload {
+  businessNumberId?: number;
+  wabaId: string;
+  phoneNumberId: string;
+  accessToken: string;
+  status?: VirtualNumberStatus;
+  qualityRating?: VirtualNumberQuality;
+  isPrimary?: boolean;
+}
+
+export interface UpdateVirtualNumberPayload extends Partial<CreateVirtualNumberPayload> {
+  messageCount24h?: number;
+  lastUsedAt?: string;
+}
+
+export const numbersAPI = {
+  getBusinessNumber: async (): Promise<BusinessNumber | null> => {
+    try {
+      const response = await api.get<BusinessNumber | null>('/admin/business-number');
+      return response.data;
+    } catch (error: any) {
+      throw new Error(error.response?.data?.message || 'Failed to fetch business number');
+    }
+  },
+
+  updateBusinessNumber: async (data: Partial<BusinessNumber>): Promise<BusinessNumber> => {
+    try {
+      const response = await api.put<BusinessNumber>('/admin/business-number', data);
+      return response.data;
+    } catch (error: any) {
+      throw new Error(error.response?.data?.message || 'Failed to update business number');
+    }
+  },
+
+  getVirtualNumbers: async (): Promise<VirtualNumber[]> => {
+    try {
+      const response = await api.get<VirtualNumber[]>('/admin/virtual-numbers');
+      return response.data;
+    } catch (error: any) {
+      throw new Error(error.response?.data?.message || 'Failed to fetch virtual numbers');
+    }
+  },
+
+  createVirtualNumber: async (data: CreateVirtualNumberPayload): Promise<VirtualNumber> => {
+    try {
+      const response = await api.post<VirtualNumber>('/admin/virtual-numbers', data);
+      return response.data;
+    } catch (error: any) {
+      throw new Error(error.response?.data?.message || 'Failed to create virtual number');
+    }
+  },
+
+  updateVirtualNumber: async (id: number, data: UpdateVirtualNumberPayload): Promise<VirtualNumber> => {
+    try {
+      const response = await api.put<VirtualNumber>(`/admin/virtual-numbers/${id}`, data);
+      return response.data;
+    } catch (error: any) {
+      throw new Error(error.response?.data?.message || 'Failed to update virtual number');
+    }
+  },
+
+  manualSwitch: async (targetId?: number): Promise<VirtualNumber> => {
+    try {
+      const response = await api.put<VirtualNumber>('/admin/virtual-numbers/switch', targetId ? { targetId } : {});
+      return response.data;
+    } catch (error: any) {
+      throw new Error(error.response?.data?.message || 'Failed to switch virtual number');
+    }
+  },
+};
+
 // User profile management API
 export interface UpdateUserRequest {
   username?: string;
