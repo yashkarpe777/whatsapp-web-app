@@ -1,9 +1,52 @@
-import { IsNotEmpty, IsOptional, IsString, IsDateString } from 'class-validator';
+import {
+  ArrayMaxSize,
+  ArrayMinSize,
+  IsArray,
+  IsDateString,
+  IsEnum,
+  IsInt,
+  IsNotEmpty,
+  IsOptional,
+  IsString,
+  MaxLength,
+  ValidateNested,
+} from 'class-validator';
+import { Type } from 'class-transformer';
+
+export class CampaignCtaButtonDto {
+  @IsEnum(['URL', 'PHONE', 'QUICK_REPLY'])
+  type: 'URL' | 'PHONE' | 'QUICK_REPLY';
+
+  @IsString()
+  @IsNotEmpty()
+  @MaxLength(120)
+  title: string;
+
+  @IsOptional()
+  @IsString()
+  payload?: string;
+
+  @IsOptional()
+  @IsString()
+  url?: string;
+
+  @IsOptional()
+  @IsString()
+  phoneNumber?: string;
+}
 
 export class CreateCampaignDto {
   @IsNotEmpty()
   @IsString()
   campaign_name: string;
+
+  @IsOptional()
+  @IsString()
+  name?: string;
+
+  @IsOptional()
+  @IsInt()
+  templateId?: number;
 
   @IsOptional()
   @IsString()
@@ -20,6 +63,22 @@ export class CreateCampaignDto {
   @IsOptional()
   @IsString()
   media_name?: string;
+
+  @IsOptional()
+  @IsString()
+  attachmentUrl?: string;
+
+  @IsOptional()
+  @IsArray()
+  @ValidateNested({ each: true })
+  @Type(() => CampaignCtaButtonDto)
+  @ArrayMaxSize(3)
+  @ArrayMinSize(0)
+  ctaButtons?: CampaignCtaButtonDto[];
+
+  @IsOptional()
+  @IsString()
+  status?: string;
 
   @IsOptional()
   @IsDateString()
