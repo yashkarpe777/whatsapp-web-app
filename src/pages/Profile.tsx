@@ -412,7 +412,7 @@ const Profile = () => {
                     Add User
                   </Button>
                 </DialogTrigger>
-                <DialogContent>
+                <DialogContent className="max-h-[90vh] w-full max-w-[92vw] overflow-y-auto sm:max-w-lg">
                   <DialogHeader>
                     <DialogTitle>Add New User</DialogTitle>
                     <DialogDescription>
