@@ -1,6 +1,7 @@
 import { Body, Controller, HttpCode, Logger, Post } from '@nestjs/common';
 import { NumbersService } from './numbers.service';
 import { VirtualNumberQuality, VirtualNumberStatus } from './enums';
+import { WebhookLogsService } from '../common/services/webhook-logs.service';
 
 interface MetaWebhookPayload {
   entry?: Array<{
@@ -15,7 +16,10 @@ interface MetaWebhookPayload {
 export class WebhooksController {
   private readonly logger = new Logger(WebhooksController.name);
 
-  constructor(private readonly numbersService: NumbersService) {}
+  constructor(
+    private readonly numbersService: NumbersService,
+    private readonly webhookLogsService: WebhookLogsService,
+  ) {}
 
   @Post('meta')
   @HttpCode(200)
@@ -75,7 +79,24 @@ export class WebhooksController {
       return;
     }
 
-    await this.numbersService.handleQualityUpdate(phoneNumberId, status, quality);
+    const updatedNumber = await this.numbersService.handleQualityUpdate(phoneNumberId, status, quality);
+
+    await this.webhookLogsService.createLog({
+      eventType: field ?? value?.event ?? 'update',
+      payload: {
+        source: 'meta_numbers',
+        referenceId: phoneNumberId,
+        status: status ?? quality ?? null,
+        data: value,
+        metadata: {
+          processedAt: new Date().toISOString(),
+          appliedStatus: status ?? null,
+          appliedQuality: quality ?? null,
+          isPrimary: updatedNumber?.isPrimary ?? null,
+        },
+      },
+      statusCode: value?.status_code ?? null,
+    });
   }
 
   private mapStatus(input?: string): VirtualNumberStatus | undefined {

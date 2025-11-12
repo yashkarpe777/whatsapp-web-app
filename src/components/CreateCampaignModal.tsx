@@ -6,11 +6,11 @@ import { Textarea } from "@/components/ui/textarea";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "@/components/ui/dialog";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { useToast } from "@/hooks/use-toast";
-import { campaignsAPI, contactsAPI } from "@/services/api";
+import { CampaignCtaButton, CampaignCtaType, campaignsAPI, contactsAPI } from "@/services/api";
 import { useNavigate } from "react-router-dom";
 import { WHATSAPP_NUMBERS } from "@/config/app";
 import { Checkbox } from "@/components/ui/checkbox";
-import { FileText, Upload } from "lucide-react";
+import { FileText, Plus, X } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 
 interface Props {
@@ -91,6 +91,11 @@ export default function CreateCampaignModal({ open, onClose, onCreated }: Props)
   const [contactsFile, setContactsFile] = useState<File | null>(null);
   const [contactsCount, setContactsCount] = useState(0);
   const [runNow, setRunNow] = useState(true);
+
+  const [ctaButtons, setCtaButtons] = useState<CampaignCtaButton[]>([]);
+  const [newCtaType, setNewCtaType] = useState<CampaignCtaType>('URL');
+  const [newCtaTitle, setNewCtaTitle] = useState('');
+  const [newCtaValue, setNewCtaValue] = useState('');
   
   // Contact selection
   const [useExistingContacts, setUseExistingContacts] = useState(false);
@@ -110,6 +115,44 @@ export default function CreateCampaignModal({ open, onClose, onCreated }: Props)
     
     fetchContactFiles();
   }, []);
+
+  useEffect(() => {
+    if (mode === 'template') {
+      setCtaButtons([]);
+      setNewCtaTitle('');
+      setNewCtaValue('');
+    }
+  }, [mode]);
+
+  const handleAddCta = () => {
+    if (!newCtaTitle.trim()) {
+      toast({ title: 'Button title required', description: 'Provide a label for the CTA button.', variant: 'destructive' });
+      return;
+    }
+
+    if (!newCtaValue.trim()) {
+      const valueLabel = newCtaType === 'URL' ? 'URL' : newCtaType === 'PHONE' ? 'phone number' : 'payload';
+      toast({ title: 'Missing CTA value', description: `Please enter a ${valueLabel} for this button.`, variant: 'destructive' });
+      return;
+    }
+
+    const nextButton: CampaignCtaButton = {
+      type: newCtaType,
+      title: newCtaTitle.trim(),
+      payload: newCtaType === 'QUICK_REPLY' ? newCtaValue.trim() : undefined,
+      url: newCtaType === 'URL' ? newCtaValue.trim() : undefined,
+      phoneNumber: newCtaType === 'PHONE' ? newCtaValue.trim() : undefined,
+    };
+
+    setCtaButtons((prev) => [...prev, nextButton]);
+    setNewCtaTitle('');
+    setNewCtaValue('');
+    setNewCtaType('URL');
+  };
+
+  const handleRemoveCta = (index: number) => {
+    setCtaButtons((prev) => prev.filter((_, idx) => idx !== index));
+  };
 
   useEffect(() => {
     if (!mediaFile) {
@@ -203,6 +246,8 @@ export default function CreateCampaignModal({ open, onClose, onCreated }: Props)
       // Note: media upload endpoint not wired yet; send empty media_url for now
       const payload: any = {
         campaign_name: campaignName,
+        name: campaignName,
+        templateId: mode === "template" ? Number(template) || undefined : undefined,
         caption: mode === "custom" ? caption : undefined,
         media_url: undefined,
         media_type: mediaFile ? mediaType : undefined,
@@ -210,6 +255,7 @@ export default function CreateCampaignModal({ open, onClose, onCreated }: Props)
         scheduled_start: startAt || undefined,
         scheduled_end: endAt || undefined,
         contact_file: useExistingContacts ? selectedContactFile : undefined,
+        ctaButtons: ctaButtons.length ? ctaButtons : undefined,
         // status remains draft by default; a future action will start and move to Active
       };
       const created = await campaignsAPI.create(payload);
@@ -247,6 +293,7 @@ export default function CreateCampaignModal({ open, onClose, onCreated }: Props)
           media_name: mediaFile ? mediaFile.name : undefined,
           caption: mode === "custom" ? caption : undefined,
           contact_file: useExistingContacts ? selectedContactFile : undefined,
+          ctaButtons,
         };
         
         // Limit localStorage size by keeping only recent campaigns
@@ -411,6 +458,95 @@ export default function CreateCampaignModal({ open, onClose, onCreated }: Props)
                       </svg>
                       <p className="mt-2 text-sm">Document preview not available</p>
                     </div>
+                  </div>
+                )}
+              </div>
+
+              <div className="space-y-3">
+                <div className="flex items-center justify-between">
+                  <Label>Call-to-Action Buttons</Label>
+                  <span className="text-xs text-muted-foreground">Up to 3 buttons</span>
+                </div>
+
+                {ctaButtons.length > 0 && (
+                  <div className="space-y-2">
+                    {ctaButtons.map((button, index) => (
+                      <div key={`${button.title}-${index}`} className="flex items-center justify-between rounded-md border p-3">
+                        <div>
+                          <p className="font-medium">{button.title}</p>
+                          <p className="text-xs text-muted-foreground capitalize">{button.type.toLowerCase()}</p>
+                          {button.type === 'URL' && button.url && (
+                            <p className="text-xs text-muted-foreground break-words">{button.url}</p>
+                          )}
+                          {button.type === 'PHONE' && button.phoneNumber && (
+                            <p className="text-xs text-muted-foreground">{button.phoneNumber}</p>
+                          )}
+                          {button.type === 'QUICK_REPLY' && button.payload && (
+                            <p className="text-xs text-muted-foreground">{button.payload}</p>
+                          )}
+                        </div>
+                        <Button
+                          type="button"
+                          variant="ghost"
+                          size="icon"
+                          onClick={() => handleRemoveCta(index)}
+                        >
+                          <X className="h-4 w-4" />
+                        </Button>
+                      </div>
+                    ))}
+                  </div>
+                )}
+
+                {ctaButtons.length < 3 ? (
+                  <div className="space-y-2 rounded-md border p-3">
+                    <div className="grid gap-2 sm:grid-cols-3">
+                      <div className="grid gap-1">
+                        <Label className="text-xs">Type</Label>
+                        <Select value={newCtaType} onValueChange={(value) => setNewCtaType(value as CampaignCtaType)}>
+                          <SelectTrigger>
+                            <SelectValue placeholder="Select type" />
+                          </SelectTrigger>
+                          <SelectContent>
+                            <SelectItem value="URL">URL Button</SelectItem>
+                            <SelectItem value="PHONE">Phone Button</SelectItem>
+                            <SelectItem value="QUICK_REPLY">Quick Reply</SelectItem>
+                          </SelectContent>
+                        </Select>
+                      </div>
+                      <div className="grid gap-1 sm:col-span-1">
+                        <Label className="text-xs">Title</Label>
+                        <Input
+                          value={newCtaTitle}
+                          onChange={(e) => setNewCtaTitle(e.target.value)}
+                          placeholder="Button text"
+                          maxLength={25}
+                        />
+                      </div>
+                      <div className="grid gap-1 sm:col-span-1">
+                        <Label className="text-xs">
+                          {newCtaType === 'URL' ? 'URL' : newCtaType === 'PHONE' ? 'Phone Number' : 'Reply Payload'}
+                        </Label>
+                        <Input
+                          value={newCtaValue}
+                          onChange={(e) => setNewCtaValue(e.target.value)}
+                          placeholder={
+                            newCtaType === 'URL'
+                              ? 'https://example.com'
+                              : newCtaType === 'PHONE'
+                              ? '+11234567890'
+                              : 'Payload'
+                          }
+                        />
+                      </div>
+                    </div>
+                    <Button type="button" variant="secondary" onClick={handleAddCta} className="w-full">
+                      <Plus className="mr-2 h-4 w-4" /> Add CTA Button
+                    </Button>
+                  </div>
+                ) : (
+                  <div className="rounded-md border border-dashed p-3 text-sm text-muted-foreground">
+                    Maximum of three CTA buttons added.
                   </div>
                 )}
               </div>

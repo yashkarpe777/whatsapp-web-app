@@ -61,6 +61,64 @@ export interface AuthResponse {
   token: string;
 }
 
+export type CampaignStatus =
+  | 'draft'
+  | 'scheduled'
+  | 'running'
+  | 'paused'
+  | 'completed'
+  | 'cancelled';
+
+export type CampaignCtaType = 'URL' | 'PHONE' | 'QUICK_REPLY';
+
+export interface CampaignCtaButton {
+  type: CampaignCtaType;
+  title: string;
+  payload?: string;
+  url?: string;
+  phoneNumber?: string;
+}
+
+export interface CampaignPayload {
+  campaign_name: string;
+  name?: string;
+  templateId?: number;
+  caption?: string;
+  media_url?: string;
+  media_type?: string;
+  media_name?: string;
+  attachmentUrl?: string;
+  ctaButtons?: CampaignCtaButton[];
+  status?: CampaignStatus;
+  scheduled_start?: string | Date;
+  scheduled_end?: string | Date;
+}
+
+export interface Campaign extends CampaignPayload {
+  id: number;
+  user?: { id: number };
+  recipientsCount: number;
+  sentCount: number;
+  successCount: number;
+  failedCount: number;
+  readCount: number;
+  lastRunAt?: string | Date | null;
+  createdAt?: string | Date;
+  updatedAt?: string | Date;
+}
+
+export interface RunCampaignPayload {
+  campaignId: number;
+  virtualNumberId?: number;
+  recipientsCount: number;
+  startImmediately?: boolean;
+}
+
+export interface RunCampaignResponse {
+  campaign: Campaign;
+  assignedNumber: VirtualNumber;
+}
+
 // Real API for PostgreSQL backend authentication
 export const authAPI = {
   login: async (credentials: LoginCredentials): Promise<AuthResponse> => {
@@ -242,6 +300,43 @@ export interface CreditTransferRequest {
   amount: number;
 }
 
+export interface AdminCampaignStats {
+  totalCampaigns: number;
+  activeCampaigns: number;
+  scheduledCampaigns: number;
+}
+
+export interface AdminNumberHealthSummary {
+  totalVirtualNumbers: number;
+  statusBreakdown: Record<string, number>;
+  qualityBreakdown: Record<string, number>;
+  primaryNumber?: {
+    id: number;
+    phoneNumberId: string;
+    status: string;
+    qualityRating: string;
+    lastUsedAt: string | null;
+  } | null;
+}
+
+export interface AdminStatsResponse {
+  totalUsers: number;
+  totalCreditsAllocated: number;
+  campaignStats: AdminCampaignStats;
+  numberHealth: AdminNumberHealthSummary;
+}
+
+export interface WebhookLogEntry {
+  id: number;
+  source: string;
+  eventType?: string | null;
+  status?: string | null;
+  referenceId?: string | null;
+  payload?: Record<string, any> | null;
+  metadata?: Record<string, any> | null;
+  createdAt: string;
+}
+
 export const adminAPI = {
   getAllUsers: async (): Promise<UserProfile[]> => {
     try {
@@ -285,6 +380,24 @@ export const adminAPI = {
       return response.data;
     } catch (error: any) {
       throw new Error(error.response?.data?.message || 'Failed to fetch credits info');
+    }
+  },
+
+  getStats: async (): Promise<AdminStatsResponse> => {
+    try {
+      const response = await api.get<AdminStatsResponse>('/admin/stats');
+      return response.data;
+    } catch (error: any) {
+      throw new Error(error.response?.data?.message || 'Failed to fetch admin stats');
+    }
+  },
+
+  getWebhookLogs: async (params?: { source?: string; eventType?: string; limit?: number }): Promise<WebhookLogEntry[]> => {
+    try {
+      const response = await api.get<WebhookLogEntry[]>('/admin/logs', { params });
+      return response.data;
+    } catch (error: any) {
+      throw new Error(error.response?.data?.message || 'Failed to fetch webhook logs');
     }
   },
 
@@ -367,79 +480,54 @@ const getFixedDashboardStats = () => {
 };
 
 export const campaignsAPI = {
-  getAll: async () => {
-    try {
-      const res = await api.get("/campaigns");
-      return res.data;
-    } catch (error) {
-      console.warn("Backend not ready, using mock campaigns data");
-      return mockCampaigns;
-    }
+  getAll: async (): Promise<Campaign[]> => {
+    const res = await api.get<Campaign[]>('/campaigns');
+    return res.data;
   },
-  getRecent: async (limit = 4) => {
-    try {
-      const res = await api.get(`/campaigns/recent?limit=${limit}`);
-      return res.data;
-    } catch (error) {
-      console.warn("Backend not ready, using mock recent campaigns data");
-      return mockCampaigns.slice(0, limit);
-    }
+
+  getById: async (id: number): Promise<Campaign> => {
+    const res = await api.get<Campaign>(`/campaigns/${id}`);
+    return res.data;
   },
+
+  getRecent: async (limit = 4): Promise<Campaign[]> => {
+    const res = await api.get<Campaign[]>(`/campaigns/recent?limit=${limit}`);
+    return res.data;
+  },
+
   getDashboardStats: async () => {
-    try {
-      const res = await api.get("/campaigns/stats");
-      return res.data;
-    } catch (error) {
-      console.warn("Backend not ready, using fixed mock dashboard stats");
-      return getFixedDashboardStats();
-    }
+    const res = await api.get('/campaigns/stats');
+    return res.data;
   },
-  create: async (data) => {
-    try {
-      const res = await api.post("/campaigns", data);
-      return res.data;
-    } catch (error) {
-      console.warn("Backend not ready, using mock data for campaign create");
-      const newCampaign = {
-        id: `${mockCampaigns.length + 1}`,
-        name: data.name,
-        status: 'draft',
-        date: new Date().toLocaleDateString('en-US', { day: 'numeric', month: 'long', year: 'numeric' }),
-        icon: 'Megaphone',
-        stats: { sent: 0, delivered: 0 }
-      };
-      mockCampaigns.unshift(newCampaign);
-      return newCampaign;
-    }
+
+  getActive: async (): Promise<Campaign[]> => {
+    const res = await api.get<Campaign[]>('/campaigns/active-campaigns');
+    return res.data;
   },
-  update: async (id, data) => {
-    try {
-      const res = await api.patch(`/campaigns/${id}`, data);
-      return res.data;
-    } catch (error) {
-      console.warn("Backend not ready, using mock data for campaign update");
-      const index = mockCampaigns.findIndex(c => c.id === id);
-      if (index !== -1) {
-        mockCampaigns[index] = { ...mockCampaigns[index], ...data };
-        return mockCampaigns[index];
-      }
-      throw new Error('Campaign not found');
-    }
+
+  create: async (payload: CampaignPayload): Promise<Campaign> => {
+    const res = await api.post<Campaign>('/campaigns/create', payload);
+    return res.data;
   },
-  remove: async (id) => {
-    try {
-      const res = await api.delete(`/campaigns/${id}`);
-      return res.data;
-    } catch (error) {
-      console.warn("Backend not ready, using mock data for campaign delete");
-      const index = mockCampaigns.findIndex(c => c.id === id);
-      if (index !== -1) {
-        const deleted = mockCampaigns[index];
-        mockCampaigns.splice(index, 1);
-        return { id, success: true };
-      }
-      throw new Error('Campaign not found');
-    }
+
+  run: async (payload: RunCampaignPayload): Promise<RunCampaignResponse> => {
+    const res = await api.post<RunCampaignResponse>('/campaigns/run', payload);
+    return res.data;
+  },
+
+  update: async (id: number, payload: Partial<CampaignPayload>): Promise<Campaign> => {
+    const res = await api.patch<Campaign>(`/campaigns/${id}`, payload);
+    return res.data;
+  },
+
+  updateStatus: async (id: number, status: CampaignStatus): Promise<Campaign> => {
+    const res = await api.put<Campaign>(`/campaigns/${id}/status`, { status });
+    return res.data;
+  },
+
+  remove: async (id: number) => {
+    const res = await api.delete(`/campaigns/${id}`);
+    return res.data;
   },
 };
 

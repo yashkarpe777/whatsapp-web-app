@@ -39,6 +39,18 @@ export class AuthService {
       throw new UnauthorizedException('Invalid credentials');
     }
 
+    if (user.status === UserStatus.INACTIVE) {
+      throw new UnauthorizedException(
+        'Your account has been deactivated by an administrator.',
+      );
+    }
+
+    if (user.status === UserStatus.SUSPENDED) {
+      throw new UnauthorizedException(
+        'Your account has been suspended. Please contact support.',
+      );
+    }
+
     const payload = { sub: user.id, username: user.username, role: user.role };
     const token = this.jwtService.sign(payload);
 

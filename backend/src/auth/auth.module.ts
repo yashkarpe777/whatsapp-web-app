@@ -10,10 +10,14 @@ import { JwtStrategy } from './strategies/jwt.strategy';
 import { RolesGuard } from './guards/roles.guard';
 import { UsersController } from './users.controller';
 import { AdminController } from './admin.controller';
+import { AdminService } from './admin.service';
+import { Campaign } from '../campaigns/entities/campaign.entity';
+import { VirtualNumber } from '../numbers/entities/virtual-number.entity';
+import { CommonModule } from '../common/common.module';
 
 @Module({
   imports: [
-    TypeOrmModule.forFeature([User]),
+    TypeOrmModule.forFeature([User, Campaign, VirtualNumber]),
     PassportModule,
     JwtModule.registerAsync({
       imports: [ConfigModule],
@@ -25,9 +29,10 @@ import { AdminController } from './admin.controller';
       }),
       inject: [ConfigService],
     }),
+    CommonModule,
   ],
   controllers: [AuthController, UsersController, AdminController],
-  providers: [AuthService, JwtStrategy, RolesGuard],
+  providers: [AuthService, JwtStrategy, RolesGuard, AdminService],
   exports: [AuthService, RolesGuard],
 })
 export class AuthModule {}

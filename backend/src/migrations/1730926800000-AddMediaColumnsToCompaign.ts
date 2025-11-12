@@ -15,7 +15,6 @@ export class AddMediaColumnsToCompaign1730926800000 implements MigrationInterfac
       END $$;
     `);
 
-    // Add media_name column if it doesn't exist
     await queryRunner.query(`
       DO $$
       BEGIN

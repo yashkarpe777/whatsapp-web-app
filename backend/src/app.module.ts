@@ -5,6 +5,8 @@ import { AuthModule } from './auth/auth.module';
 import { CampaignsModule } from './campaigns/campaigns.module';
 import { ContactsModule } from './contacts/contacts.module';
 import { NumbersModule } from './numbers/numbers.module';
+import { TemplatesModule } from './templates/templates.module';
+import { CommonModule } from './common/common.module';
 
 @Module({
   imports: [
@@ -29,6 +31,8 @@ import { NumbersModule } from './numbers/numbers.module';
     CampaignsModule,
     ContactsModule,
     NumbersModule,
+    TemplatesModule,
+    CommonModule,
   ],
 })
 export class AppModule {}
