@@ -15,13 +15,27 @@ interface Campaign {
   status: 'running' | 'paused' | 'retrying';
   template: string;
   totalContacts: number;
-  numberId?: string;
+  numberId?: number | string;
+  numberLabel?: string;
   // Media information
   media_type?: string;
   media_name?: string;
   caption?: string;
   // Track last update time for performance optimization
   lastUpdated?: number;
+  dispatchMeta?: {
+    totalBatches: number;
+    batchSize: number;
+    jobIds: string[];
+    sender?: {
+      virtualNumberId: number;
+      virtualNumberLabel?: string;
+      businessNumberId?: number;
+      businessNumber?: string;
+      switchedAt?: string;
+      switchReason?: string;
+    };
+  };
 }
 
 const ActiveCampaigns = () => {
@@ -170,7 +184,13 @@ const ActiveCampaigns = () => {
             <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2">
               <div className="space-y-1">
                 <h3 className="text-lg font-semibold break-words">{campaign.name}</h3>
-                <p className="text-sm text-muted-foreground">
+                <p className="text-sm text-muted-foreground space-y-1">
+                  {(campaign.numberLabel || campaign.numberId) && (
+                    <span className="block">
+                      <span className="font-medium">Sending via:</span>{' '}
+                      {campaign.numberLabel || campaign.numberId}
+                    </span>
+                  )}
                   {campaign.template === 'custom' ? (
                     <>
                       {campaign.media_type && (

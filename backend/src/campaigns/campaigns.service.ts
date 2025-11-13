@@ -12,12 +12,19 @@ import { UpdateCampaignDto } from './dto/update.campaign.dto';
 import { RunCampaignDto } from './dto/run.campaign.dto';
 import { User } from '../auth/entities/user.entity';
 import { NumbersService } from '../numbers/numbers.service';
+import { DispatchService } from '../dispatch/dispatch.service';
 import { VirtualNumberStatus } from '../numbers/enums';
 import {
   MessageTemplate,
   TemplateApprovalStatus,
 } from './entities/message-template.entity';
 import { VirtualNumber } from '../numbers/entities/virtual-number.entity';
+import {
+  CampaignMediaValidationError,
+  MEDIA_SIZE_LIMITS,
+  ONE_MB,
+  validateCampaignMediaSize,
+} from './utils/media-validator';
 
 @Injectable()
 export class CampaignsService {
@@ -29,17 +36,44 @@ export class CampaignsService {
     @InjectRepository(MessageTemplate)
     private templateRepo: Repository<MessageTemplate>,
     private readonly numbersService: NumbersService,
+    private readonly dispatchService: DispatchService,
   ) {}
 
   async create(dto: CreateCampaignDto, user: User) {
     await this.ensureTemplateAvailability(dto.templateId);
 
+    const {
+      media_mime_type: mediaMimeType,
+      media_size: mediaSize,
+      ...campaignDto
+    } = dto;
+
+    try {
+      validateCampaignMediaSize({
+        mediaType: campaignDto.media_type,
+        mediaUrl: campaignDto.media_url,
+        mediaName: campaignDto.media_name,
+        attachmentUrl: campaignDto.attachmentUrl,
+        mimeType: mediaMimeType,
+        mediaSize,
+      });
+    } catch (error) {
+      if (error instanceof CampaignMediaValidationError) {
+        const limitMb = (MEDIA_SIZE_LIMITS[error.mediaType] / ONE_MB).toFixed(2);
+        throw new BadRequestException(
+          `Uploaded ${error.mediaType} exceeds the maximum allowed size of ${limitMb} MB.`,
+        );
+      }
+
+      throw error;
+    }
+
     const campaign = this.campaignRepo.create({
-      ...dto,
+      ...campaignDto,
       user,
-      name: dto.name ?? dto.campaign_name,
-      ctaButtons: dto.ctaButtons ?? [],
-      status: dto.status ?? 'draft',
+      name: campaignDto.name ?? campaignDto.campaign_name,
+      ctaButtons: campaignDto.ctaButtons ?? [],
+      status: campaignDto.status ?? 'draft',
     });
 
     return this.campaignRepo.save(campaign);
@@ -126,12 +160,29 @@ export class CampaignsService {
       throw new NotFoundException(`Invalid campaign ID: ${id}`);
     }
 
-    if (dto.templateId) {
-      await this.ensureTemplateAvailability(dto.templateId);
-    }
+    const {
+      media_mime_type: mediaMimeType,
+      media_size: mediaSize,
+      ...updateDto
+    } = dto;
 
     try {
-      const updateResult = await this.campaignRepo.update(campaignId, dto);
+      const existing = await this.findOne(campaignId);
+
+      if (updateDto.templateId) {
+        await this.ensureTemplateAvailability(updateDto.templateId);
+      }
+
+      validateCampaignMediaSize({
+        mediaType: updateDto.media_type ?? existing.media_type,
+        mediaUrl: updateDto.media_url ?? existing.media_url,
+        mediaName: updateDto.media_name ?? existing.media_name,
+        attachmentUrl: updateDto.attachmentUrl ?? existing.attachmentUrl,
+        mimeType: mediaMimeType,
+        mediaSize,
+      });
+
+      const updateResult = await this.campaignRepo.update(campaignId, updateDto);
       
       if (updateResult.affected === 0) {
         throw new NotFoundException(`Campaign with ID ${id} not found`);
@@ -203,13 +254,30 @@ export class CampaignsService {
 
     const saved = await this.campaignRepo.save(campaign);
 
+    let dispatchResult = null;
+
     if (shouldStartNow) {
       await this.numbersService.recordMessageUsage(assignedNumber.id, recipientsCount);
+
+      dispatchResult = this.dispatchService.enqueueCampaign({
+        campaignId: saved.id,
+        userId: user.id,
+        recipientsCount,
+        preferredNumberId: dto.virtualNumberId,
+        enqueueReason: 'manual_run',
+        assignedNumberId: assignedNumber.id,
+        assignedNumberLabel: assignedNumber.phoneNumberId,
+        businessNumberId: assignedNumber.businessNumber?.id,
+        businessNumber:
+          assignedNumber.businessNumber?.displayPhoneNumber ||
+          assignedNumber.businessNumber?.businessName,
+      });
     }
 
     return {
       campaign: saved,
       assignedNumber,
+      dispatch: dispatchResult,
     };
   }
 
@@ -246,7 +314,7 @@ export class CampaignsService {
 
     if (account.credits < amount) {
       throw new ForbiddenException(
-        `Insufficient credits. Available: ${account.credits}, required: ${amount}`,
+        `You don't have enough credits to run this campaign. Contact admin for more credits. (Available: ${account.credits}, Required: ${amount})`,
       );
     }
 

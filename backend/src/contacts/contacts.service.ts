@@ -1,6 +1,6 @@
 import { Injectable, NotFoundException } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { Repository, Not, IsNull } from 'typeorm';
+import { In, Repository } from 'typeorm';
 import { Contact } from './entities/contact.entity';
 import { CreateContactDto } from './dto/create-contact.dto';
 import { UpdateContactDto } from './dto/update-contact.dto';
@@ -11,6 +11,17 @@ import * as path from 'path';
 const csv = require('csv-parser');
 
 import * as XLSX from 'xlsx';
+
+const PHONE_HEADER_KEYWORDS = [
+  'phone',
+  'number',
+  'mobile',
+  'contact',
+  'tel',
+  'telephone',
+  'cell',
+  'whatsapp',
+];
 
 @Injectable()
 export class ContactsService {
@@ -159,9 +170,8 @@ export class ContactsService {
     }
   }
 
-  private async processExcelFile(filePath: string, filename: string, user: User): Promise<{ total: number, unique: number }> {
-    const results = [];
-    const phoneNumbers = new Set();
+  private async processExcelFile(filePath: string, filename: string, user: User): Promise<{ total: number; unique: number }> {
+    const uniquePhones = new Set<string>();
 
     try {
       console.log(`Processing Excel file: ${filename}`);
@@ -169,147 +179,77 @@ export class ContactsService {
       const workbook = XLSX.readFile(filePath, { type: 'file', cellText: true, cellDates: true });
       console.log(`Workbook sheets: ${workbook.SheetNames.join(', ')}`);
 
-      // Process all sheets in the workbook
       for (const sheetName of workbook.SheetNames) {
         console.log(`Processing sheet: ${sheetName}`);
-
         const worksheet = workbook.Sheets[sheetName];
 
-        const jsonData = XLSX.utils.sheet_to_json(worksheet, { defval: '' });
+        const jsonData = XLSX.utils.sheet_to_json<Record<string, any>>(worksheet, { defval: '' });
         console.log(`Sheet data (object format): ${jsonData.length} rows`);
-        if (jsonData.length > 0) {
-          console.log('Sample row (object):', jsonData[0]);
-        }
-
-        // Method 2: Use sheet_to_json with header:1 to get array format
-        // Convert sheet to a 2D array safely
-        const arrayData = XLSX.utils.sheet_to_json<string[]>(worksheet, { header: 1, defval: '' }) as string[][];
-
-        console.log(`Sheet data (array format): ${arrayData.length} rows`);
-        if (arrayData.length > 0) {
-          console.log('Sample row (array):', arrayData[0]);
-        }
 
         if (jsonData.length > 0) {
           console.log('Processing data in object format');
           for (const row of jsonData) {
-            // Try to find phone number in any field
-            const phoneKeys = Object.keys(row).filter(key =>
-              ['phone', 'number', 'mobile', 'contact', 'tel', 'telephone', 'cell'].some(keyword =>
-                String(key).toLowerCase().includes(keyword)
-              )
-            );
-
-            let phone = null;
-
-            // If we found phone keys, use the first one
-            if (phoneKeys.length > 0) {
-              phone = String(row[phoneKeys[0]]).trim();
-              console.log(`Found phone in column '${phoneKeys[0]}': ${phone}`);
-            } else {
-              // Otherwise try the first column or a column named 'A'
-              const firstKey = Object.keys(row)[0];
-              if (firstKey) {
-                phone = String(row[firstKey]).trim();
-                console.log(`Using first column '${firstKey}': ${phone}`);
-              }
-            }
-
-            // Add the phone if it's valid
-            if (phone && !phoneNumbers.has(phone)) {
-              phoneNumbers.add(phone);
-              // Create a proper entity instance instead of a plain object
-              const contact = this.contactRepo.create({
-                phone: phone,
-                source_file: filename,
-                user: { id: user.id }
-              });
-              results.push(contact);
-              console.log(`Added phone: ${phone}`);
+            const phone = this.extractPhoneFromObjectRow(row);
+            if (phone) {
+              uniquePhones.add(phone);
             }
           }
+          continue;
         }
-        else if (arrayData.length > 0) {
+
+        const arrayData = XLSX.utils.sheet_to_json<any[]>(worksheet, { header: 1, defval: '' }) as any[][];
+        console.log(`Sheet data (array format): ${arrayData.length} rows`);
+
+        if (arrayData.length > 1) {
           console.log('Processing data in array format');
-
-          const headers = arrayData[0].map(h => String(h || '').toLowerCase());
-
-          let phoneColumnIndex = headers.findIndex(header =>
-            ['phone', 'number', 'mobile', 'contact', 'tel', 'telephone', 'cell'].some(keyword =>
-              String(header).toLowerCase().includes(keyword)
-            )
-          );
-
-          // If no phone column found, use the first column
-          if (phoneColumnIndex === -1) phoneColumnIndex = 0;
-          console.log(`Using column index: ${phoneColumnIndex}`);
-
-          // Process each row (skip header row)
           for (let i = 1; i < arrayData.length; i++) {
             const row = arrayData[i];
-            if (row && row[phoneColumnIndex]) {
-              const phone = String(row[phoneColumnIndex]).trim();
+            const phone = this.extractPhoneFromArrayRow(row);
+            if (phone) {
+              uniquePhones.add(phone);
+            }
+          }
+        }
+      }
 
-              if (phone && !phoneNumbers.has(phone)) {
-                phoneNumbers.add(phone);
-                // Create a proper entity instance instead of a plain object
-                const contact = this.contactRepo.create({
-                  phone: phone,
-                  source_file: filename,
-                  user: { id: user.id }
-                });
-                results.push(contact);
-                console.log(`Added phone from row ${i}: ${phone}`);
+      if (uniquePhones.size === 0 && workbook.SheetNames.length > 0) {
+        console.log('Trying direct cell access method');
+        const firstSheet = workbook.SheetNames[0];
+        const firstWorksheet = workbook.Sheets[firstSheet];
+        const range = XLSX.utils.decode_range(firstWorksheet['!ref'] || 'A1');
+
+        for (let row = range.s.r; row <= range.e.r; row++) {
+          for (let col = range.s.c; col <= range.e.c; col++) {
+            const cellAddress = XLSX.utils.encode_cell({ r: row, c: col });
+            const cell = firstWorksheet[cellAddress];
+            if (cell && cell.v) {
+              const phone = this.normalizePhone(cell.v);
+              if (phone) {
+                uniquePhones.add(phone);
               }
             }
           }
         }
       }
 
-      // If still no results, try a direct cell-by-cell approach as a last resort
-      if (results.length === 0 && workbook.SheetNames.length > 0) {
-        console.log('Trying direct cell access method');
+      const phonesFound = Array.from(uniquePhones);
+      const newPhones = await this.excludeExistingPhones(phonesFound, user.id);
 
-        // Get the first worksheet again
-        const firstSheet = workbook.SheetNames[0];
-        const firstWorksheet = workbook.Sheets[firstSheet];
+      if (newPhones.length > 0) {
+        console.log(`Saving ${newPhones.length} contacts to database`);
+        const entities = newPhones.map((phone) =>
+          this.contactRepo.create({
+            phone,
+            source_file: filename,
+            user: { id: user.id },
+          }),
+        );
 
-        // Get the range of the sheet
-        const range = XLSX.utils.decode_range(firstWorksheet['!ref'] || 'A1');
-
-        // Loop through all cells in the first column
-        for (let row = range.s.r; row <= range.e.r; row++) {
-          // Try first column (A)
-          const cellAddress = XLSX.utils.encode_cell({ r: row, c: 0 });
-          const cell = firstWorksheet[cellAddress];
-
-          if (cell && cell.v) {
-            const phone = String(cell.v).trim();
-
-            if (phone && !phoneNumbers.has(phone)) {
-              phoneNumbers.add(phone);
-              // Create a proper entity instance instead of a plain object
-              const contact = this.contactRepo.create({
-                phone: phone,
-                source_file: filename,
-                user: { id: user.id }
-              });
-              results.push(contact);
-              console.log(`Added phone from cell ${cellAddress}: ${phone}`);
-            }
-          }
-        }
-      }
-
-      // Save the results to the database
-      if (results.length > 0) {
-        console.log(`Saving ${results.length} contacts to database`);
         try {
-          // Use insert instead of save for better performance with new entities
           const batchSize = 100;
-          for (let i = 0; i < results.length; i += batchSize) {
-            const batch = results.slice(i, i + batchSize);
-            console.log(`Inserting batch ${i/batchSize + 1} of ${Math.ceil(results.length/batchSize)}`);
+          for (let i = 0; i < entities.length; i += batchSize) {
+            const batch = entities.slice(i, i + batchSize);
+            console.log(`Inserting batch ${i / batchSize + 1} of ${Math.ceil(entities.length / batchSize)}`);
             await this.contactRepo.insert(batch);
           }
           console.log('All contacts saved successfully');
@@ -318,13 +258,13 @@ export class ContactsService {
           throw new Error(`Database error: ${error.message}`);
         }
       } else {
-        console.log('No contacts found to save');
+        console.log('No new contacts found to save after deduplication');
       }
 
-      console.log(`Excel processing complete: ${results.length} total, ${phoneNumbers.size} unique`);
+      console.log(`Excel processing complete: ${phonesFound.length} total unique in file, ${newPhones.length} newly stored`);
       return {
-        total: results.length,
-        unique: phoneNumbers.size
+        total: phonesFound.length,
+        unique: newPhones.length,
       };
     } catch (error) {
       console.error('Error processing Excel file:', error);
@@ -332,69 +272,48 @@ export class ContactsService {
     }
   }
 
-  private async processCsvFile(filePath: string, filename: string, user: User): Promise<{ total: number, unique: number }> {
-    const results = [];
-    const phoneNumbers = new Set();
+  private async processCsvFile(filePath: string, filename: string, user: User): Promise<{ total: number; unique: number }> {
+    const uniquePhones = new Set<string>();
 
-    return new Promise<{ total: number, unique: number }>((resolve, reject) => {
+    return new Promise<{ total: number; unique: number }>((resolve, reject) => {
       try {
         fs.createReadStream(filePath)
           .pipe(csv())
           .on('data', (data) => {
-            // Try to find a column that contains phone numbers
-            const phoneKey = Object.keys(data).find(key =>
-              ['phone', 'phone_number', 'number', 'mobile', 'contact', 'tel', 'telephone', 'cell'].some(variant =>
-                key.toLowerCase().includes(variant)
-              )
-            );
-
-            // If we found a phone column, process the data
-            if (phoneKey && data[phoneKey]) {
-              const phone = data[phoneKey].toString().trim();
-              if (phone && !phoneNumbers.has(phone)) {
-                phoneNumbers.add(phone);
-                // Create a proper entity instance instead of a plain object
-                const contact = this.contactRepo.create({
-                  phone: phone,
-                  source_file: filename,
-                  user: { id: user.id }
-                });
-                results.push(contact);
-              }
-            } else {
-              // If no phone column found, try the first column
-              const firstKey = Object.keys(data)[0];
-              if (firstKey && data[firstKey]) {
-                const phone = data[firstKey].toString().trim();
-                if (phone && !phoneNumbers.has(phone) && /^[+\d\s()-]+$/.test(phone)) { // Basic phone format check
-                  phoneNumbers.add(phone);
-                  // Create a proper entity instance instead of a plain object
-                  const contact = this.contactRepo.create({
-                    phone: phone,
-                    source_file: filename,
-                    user: { id: user.id }
-                  });
-                  results.push(contact);
-                }
-              }
+            const phone = this.extractPhoneFromObjectRow(data);
+            if (phone) {
+              uniquePhones.add(phone);
             }
           })
           .on('end', async () => {
             try {
-              if (results.length > 0) {
-                console.log(`Saving ${results.length} contacts to database`);
-                // Use insert instead of save for better performance with new entities
+              const phonesFound = Array.from(uniquePhones);
+              const newPhones = await this.excludeExistingPhones(phonesFound, user.id);
+
+              if (newPhones.length > 0) {
+                console.log(`Saving ${newPhones.length} contacts to database`);
+                const entities = newPhones.map((phone) =>
+                  this.contactRepo.create({
+                    phone,
+                    source_file: filename,
+                    user: { id: user.id },
+                  }),
+                );
+
                 const batchSize = 100;
-                for (let i = 0; i < results.length; i += batchSize) {
-                  const batch = results.slice(i, i + batchSize);
-                  console.log(`Inserting batch ${i/batchSize + 1} of ${Math.ceil(results.length/batchSize)}`);
+                for (let i = 0; i < entities.length; i += batchSize) {
+                  const batch = entities.slice(i, i + batchSize);
+                  console.log(`Inserting batch ${i / batchSize + 1} of ${Math.ceil(entities.length / batchSize)}`);
                   await this.contactRepo.insert(batch);
                 }
                 console.log('All contacts saved successfully');
+              } else {
+                console.log('No new contacts found to save after deduplication');
               }
+
               resolve({
-                total: results.length,
-                unique: phoneNumbers.size
+                total: phonesFound.length,
+                unique: newPhones.length,
               });
             } catch (error) {
               reject(error);
@@ -407,5 +326,105 @@ export class ContactsService {
         reject(error);
       }
     });
+  }
+
+  private extractPhoneFromObjectRow(row: Record<string, any>): string | null {
+    if (!row || typeof row !== 'object') {
+      return null;
+    }
+
+    const keys = Object.keys(row);
+    const prioritized = keys.filter((key) => this.isPhoneHeader(key));
+    const orderedKeys = [...new Set([...prioritized, ...keys])];
+
+    for (const key of orderedKeys) {
+      const phone = this.normalizePhone(row[key]);
+      if (phone) {
+        return phone;
+      }
+    }
+
+    for (const value of Object.values(row)) {
+      const phone = this.normalizePhone(value);
+      if (phone) {
+        return phone;
+      }
+    }
+
+    return null;
+  }
+
+  private extractPhoneFromArrayRow(row: any[]): string | null {
+    if (!Array.isArray(row)) {
+      return null;
+    }
+
+    for (const cell of row) {
+      const phone = this.normalizePhone(cell);
+      if (phone) {
+        return phone;
+      }
+    }
+
+    return null;
+  }
+
+  private isPhoneHeader(header: string): boolean {
+    const normalized = String(header || '').toLowerCase();
+    return PHONE_HEADER_KEYWORDS.some((keyword) => normalized.includes(keyword));
+  }
+
+  private normalizePhone(value: any): string | null {
+    if (value === undefined || value === null) {
+      return null;
+    }
+
+    const raw = String(value).trim();
+    if (!raw) {
+      return null;
+    }
+
+    const cleaned = raw.replace(/[^+\d]/g, '');
+    if (!cleaned) {
+      return null;
+    }
+
+    if (!/^\+?\d{6,15}$/.test(cleaned)) {
+      return null;
+    }
+
+    if (cleaned.startsWith('00')) {
+      return `+${cleaned.slice(2)}`;
+    }
+
+    if (cleaned.startsWith('+')) {
+      return cleaned;
+    }
+
+    return cleaned;
+  }
+
+  private async excludeExistingPhones(phones: string[], userId: number): Promise<string[]> {
+    if (!phones.length) {
+      return [];
+    }
+
+    const chunkSize = 500;
+    const existing = new Set<string>();
+
+    for (let i = 0; i < phones.length; i += chunkSize) {
+      const chunk = phones.slice(i, i + chunkSize);
+      const found = await this.contactRepo.find({
+        select: ['phone'],
+        where: {
+          user: { id: userId },
+          phone: In(chunk),
+        },
+      });
+
+      found.forEach((contact) => existing.add(contact.phone));
+    }
+
+    return phones.filter((phone) => !existing.has(phone));
   }
 }

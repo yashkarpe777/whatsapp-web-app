@@ -5,6 +5,7 @@ import * as fs from 'fs';
 import * as path from 'path';
 import { ExceptionFilter, Catch, ArgumentsHost, HttpException, HttpStatus } from '@nestjs/common';
 import { Request, Response } from 'express';
+import * as express from 'express';
 
 @Catch()
 class GlobalExceptionFilter implements ExceptionFilter {
@@ -41,8 +42,15 @@ async function bootstrap() {
     fs.mkdirSync(uploadsDir, { recursive: true });
     console.log(`Created uploads directory at ${uploadsDir}`);
   }
+
+  const mediaDir = path.join(uploadsDir, 'media');
+  if (!fs.existsSync(mediaDir)) {
+    fs.mkdirSync(mediaDir, { recursive: true });
+    console.log(`Created media directory at ${mediaDir}`);
+  }
   
   const app = await NestFactory.create(AppModule);
+  app.use('/media', express.static(mediaDir));
   
   // Enable CORS for frontend (allow multiple ports)
   app.enableCors({

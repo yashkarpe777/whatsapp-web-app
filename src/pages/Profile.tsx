@@ -33,6 +33,7 @@ const Profile = () => {
   const [usersList, setUsersList] = useState<any[]>([]);
   const [selectedTab, setSelectedTab] = useState('profile');
   const [showAddUserDialog, setShowAddUserDialog] = useState(false);
+  const [creditInputs, setCreditInputs] = useState<Record<number, number>>({});
 
   // Fetch user profile data
   useEffect(() => {
@@ -61,7 +62,7 @@ const Profile = () => {
 
   // Fetch users list for admin
   useEffect(() => {
-    if (isAdmin() && selectedTab === 'users') {
+    if (isAdmin() && (selectedTab === 'users' || selectedTab === 'credits')) {
       const fetchUsers = async () => {
         try {
           setLoading(true);
@@ -230,19 +231,64 @@ const Profile = () => {
     try {
       setLoading(true);
       await adminAPI.transferCredits({ userId, amount });
-      
-      // Refresh users list
+
       const users = await adminAPI.getAllUsers();
       setUsersList(users);
-      
+
       toast({
         title: 'Success',
-        description: `${amount} credits transferred successfully`,
+        description: `${amount} credits added successfully`,
       });
     } catch (error: any) {
       toast({
         title: 'Error',
-        description: error.message || 'Failed to transfer credits',
+        description: error.message || 'Failed to add credits',
+        variant: 'destructive',
+      });
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handleDeductCredits = async (userId: number, amount: number) => {
+    try {
+      setLoading(true);
+      await adminAPI.deductCredits({ userId, amount });
+
+      const users = await adminAPI.getAllUsers();
+      setUsersList(users);
+
+      toast({
+        title: 'Success',
+        description: `${amount} credits deducted successfully`,
+      });
+    } catch (error: any) {
+      toast({
+        title: 'Error',
+        description: error.message || 'Failed to deduct credits',
+        variant: 'destructive',
+      });
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handleResetCredits = async (userId: number) => {
+    try {
+      setLoading(true);
+      await adminAPI.setUserCredits(userId, 0);
+
+      const users = await adminAPI.getAllUsers();
+      setUsersList(users);
+
+      toast({
+        title: 'Success',
+        description: 'Credits reset to 0',
+      });
+    } catch (error: any) {
+      toast({
+        title: 'Error',
+        description: error.message || 'Failed to reset credits',
         variant: 'destructive',
       });
     } finally {
@@ -563,16 +609,78 @@ const Profile = () => {
           <Card>
             <CardHeader>
               <CardTitle>Credits Management</CardTitle>
-              <CardDescription>Manage and transfer credits between users</CardDescription>
+              <CardDescription>Add, deduct, or reset credits for users</CardDescription>
             </CardHeader>
             <CardContent>
-              <p className="text-center text-muted-foreground mb-6">
-                This feature will be available in the next update.
-              </p>
-              <div className="flex justify-center">
-                <Button onClick={() => setSelectedTab('users')}>
-                  Go to User Management
-                </Button>
+              <div className="rounded-md border">
+                <table className="w-full text-sm">
+                  <thead>
+                    <tr className="border-b bg-muted/50 text-muted-foreground">
+                      <th className="h-10 px-4 text-left font-medium">Username</th>
+                      <th className="h-10 px-4 text-left font-medium">Email</th>
+                      <th className="h-10 px-4 text-left font-medium">Credits</th>
+                      <th className="h-10 px-4 text-left font-medium">Amount</th>
+                      <th className="h-10 px-4 text-left font-medium">Actions</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {usersList.map((u) => (
+                      <tr key={u.id} className="border-b hover:bg-muted/50">
+                        <td className="p-4">{u.username}</td>
+                        <td className="p-4">{u.email}</td>
+                        <td className="p-4">{u.credits}</td>
+                        <td className="p-4">
+                          <Input
+                            type="number"
+                            min={1}
+                            value={creditInputs[u.id] ?? 10}
+                            onChange={(e) =>
+                              setCreditInputs((prev) => ({
+                                ...prev,
+                                [u.id]: parseInt(e.target.value || '0') || 0,
+                              }))
+                            }
+                            className="w-28"
+                          />
+                        </td>
+                        <td className="p-4">
+                          <div className="flex flex-wrap gap-2">
+                            <Button
+                              size="sm"
+                              onClick={() => handleTransferCredits(u.id, Math.max(1, creditInputs[u.id] ?? 10))}
+                              disabled={loading}
+                            >
+                              Add
+                            </Button>
+                            <Button
+                              size="sm"
+                              variant="outline"
+                              onClick={() => handleDeductCredits(u.id, Math.max(1, creditInputs[u.id] ?? 10))}
+                              disabled={loading}
+                            >
+                              Deduct
+                            </Button>
+                            <Button
+                              size="sm"
+                              variant="destructive"
+                              onClick={() => handleResetCredits(u.id)}
+                              disabled={loading}
+                            >
+                              Reset to 0
+                            </Button>
+                          </div>
+                        </td>
+                      </tr>
+                    ))}
+                    {usersList.length === 0 && (
+                      <tr>
+                        <td colSpan={5} className="p-4 text-center text-muted-foreground">
+                          {loading ? 'Loading users...' : 'No users found'}
+                        </td>
+                      </tr>
+                    )}
+                  </tbody>
+                </table>
               </div>
             </CardContent>
           </Card>

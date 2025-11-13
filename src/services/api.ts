@@ -1,4 +1,5 @@
 import axios from 'axios';
+import type { AxiosProgressEvent } from 'axios';
 
 const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || 'http://localhost:8080/api';
 
@@ -117,7 +118,70 @@ export interface RunCampaignPayload {
 export interface RunCampaignResponse {
   campaign: Campaign;
   assignedNumber: VirtualNumber;
+  dispatch?: CampaignDispatchSummary;
 }
+
+export interface CampaignDispatchBatchSummary {
+  id: string;
+  status: 'queued' | 'in_progress' | 'completed' | 'failed' | 'cancelled';
+  batchIndex: number;
+  totalBatches: number;
+  size: number;
+  startedAt?: string;
+  finishedAt?: string;
+  attempt: number;
+  error?: string;
+}
+
+export interface CampaignDispatchSenderSummary {
+  virtualNumberId: number;
+  virtualNumberLabel?: string;
+  businessNumberId?: number;
+  businessNumber?: string;
+  switchedAt?: string;
+  switchReason?: string;
+}
+
+export interface CampaignDispatchSummary {
+  jobIds: string[];
+  totalBatches: number;
+  batchSize: number;
+  estimatedDurationSeconds: number;
+  batches: CampaignDispatchBatchSummary[];
+  sender: CampaignDispatchSenderSummary;
+}
+
+export interface MediaUploadResponse {
+  filename: string;
+  originalName: string;
+  mimeType: string;
+  size: number;
+  url: string;
+  checksum?: string;
+}
+
+export const mediaAPI = {
+  upload: async (
+    file: File,
+    onProgress?: (progress: number) => void,
+  ): Promise<MediaUploadResponse> => {
+    const formData = new FormData();
+    formData.append('file', file);
+
+    const response = await api.post<MediaUploadResponse>('/media', formData, {
+      headers: {
+        'Content-Type': 'multipart/form-data',
+      },
+      onUploadProgress: (event: AxiosProgressEvent) => {
+        if (!event.total) return;
+        const percent = Math.round((event.loaded * 100) / event.total);
+        onProgress?.(percent);
+      },
+    });
+
+    return response.data;
+  },
+};
 
 // Real API for PostgreSQL backend authentication
 export const authAPI = {
@@ -326,6 +390,67 @@ export interface AdminStatsResponse {
   numberHealth: AdminNumberHealthSummary;
 }
 
+export interface CampaignReportSummary {
+  id: number;
+  campaignId: number;
+  campaignName: string;
+  total: number;
+  delivered: number;
+  failed: number;
+  read: number;
+  readCount: number;
+  deliveryRate: number;
+  failureRate: number;
+  lastUpdated: string;
+}
+
+export interface CampaignReportsOverview {
+  totals: {
+    total: number;
+    delivered: number;
+    failed: number;
+    read: number;
+    deliveryRate: number;
+    failureRate: number;
+  };
+  campaigns: CampaignReportSummary[];
+}
+
+export interface CampaignReportResponse {
+  id: number;
+  campaignId: number;
+  campaignName: string;
+  total: number;
+  delivered: number;
+  failed: number;
+  read: number;
+  readCount: number;
+  createdAt: string;
+  lastUpdated: string;
+  deliveryRate: number;
+  failureRate: number;
+}
+
+export const reportsAPI = {
+  getOverview: async (): Promise<CampaignReportsOverview> => {
+    try {
+      const response = await api.get<CampaignReportsOverview>('/reports/campaign');
+      return response.data;
+    } catch (error: any) {
+      throw new Error(error.response?.data?.message || 'Failed to fetch campaign reports');
+    }
+  },
+
+  getCampaignReport: async (campaignId: number): Promise<CampaignReportResponse> => {
+    try {
+      const response = await api.get<CampaignReportResponse>(`/reports/campaign/${campaignId}`);
+      return response.data;
+    } catch (error: any) {
+      throw new Error(error.response?.data?.message || 'Failed to fetch campaign report');
+    }
+  },
+};
+
 export interface WebhookLogEntry {
   id: number;
   source: string;
@@ -371,6 +496,24 @@ export const adminAPI = {
       return response.data;
     } catch (error: any) {
       throw new Error(error.response?.data?.message || 'Failed to transfer credits');
+    }
+  },
+
+  deductCredits: async (data: CreditTransferRequest): Promise<any> => {
+    try {
+      const response = await api.post('/admin/credits/deduct', data);
+      return response.data;
+    } catch (error: any) {
+      throw new Error(error.response?.data?.message || 'Failed to deduct credits');
+    }
+  },
+
+  setUserCredits: async (id: number, credits: number): Promise<any> => {
+    try {
+      const response = await api.put(`/admin/users/${id}/credits`, { credits });
+      return response.data;
+    } catch (error: any) {
+      throw new Error(error.response?.data?.message || 'Failed to set user credits');
     }
   },
 

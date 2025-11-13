@@ -9,6 +9,7 @@ import {
   IsOptional,
   IsString,
   MaxLength,
+  Min,
   ValidateNested,
 } from 'class-validator';
 import { Type } from 'class-transformer';
@@ -67,6 +68,16 @@ export class CreateCampaignDto {
   @IsOptional()
   @IsString()
   attachmentUrl?: string;
+
+  @IsOptional()
+  @IsString()
+  media_mime_type?: string;
+
+  @IsOptional()
+  @Type(() => Number)
+  @IsInt()
+  @Min(0)
+  media_size?: number;
 
   @IsOptional()
   @IsArray()

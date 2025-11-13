@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -6,7 +6,7 @@ import { Textarea } from "@/components/ui/textarea";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "@/components/ui/dialog";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { useToast } from "@/hooks/use-toast";
-import { CampaignCtaButton, CampaignCtaType, campaignsAPI, contactsAPI } from "@/services/api";
+import { CampaignCtaButton, CampaignCtaType, campaignsAPI, contactsAPI, mediaAPI } from "@/services/api";
 import { useNavigate } from "react-router-dom";
 import { WHATSAPP_NUMBERS } from "@/config/app";
 import { Checkbox } from "@/components/ui/checkbox";
@@ -85,12 +85,16 @@ export default function CreateCampaignModal({ open, onClose, onCreated }: Props)
   const [mediaFile, setMediaFile] = useState<File | null>(null);
   const [mediaPreview, setMediaPreview] = useState<string | null>(null);
   const [mediaType, setMediaType] = useState<'image' | 'video' | 'document' | null>(null);
+  const [mediaUploadUrl, setMediaUploadUrl] = useState<string | null>(null);
+  const [mediaUploadProgress, setMediaUploadProgress] = useState<number | null>(null);
+  const [uploadingMedia, setUploadingMedia] = useState(false);
   const [numberId, setNumberId] = useState("");
   const [startAt, setStartAt] = useState<string>("");
   const [endAt, setEndAt] = useState<string>("");
   const [contactsFile, setContactsFile] = useState<File | null>(null);
   const [contactsCount, setContactsCount] = useState(0);
   const [runNow, setRunNow] = useState(true);
+  const mediaUploadRequestRef = useRef(0);
 
   const [ctaButtons, setCtaButtons] = useState<CampaignCtaButton[]>([]);
   const [newCtaType, setNewCtaType] = useState<CampaignCtaType>('URL');
@@ -175,6 +179,9 @@ export default function CreateCampaignModal({ open, onClose, onCreated }: Props)
       const url = URL.createObjectURL(mediaFile);
       setMediaPreview(url);
       return () => URL.revokeObjectURL(url);
+    } else if (fileType === 'audio') {
+      setMediaType('document');
+      setMediaPreview(null);
     } else if (
       fileType === 'application' || 
       ['pdf', 'doc', 'docx', 'xls', 'xlsx', 'ppt', 'pptx', 'txt'].includes(fileExt || '')
@@ -187,49 +194,123 @@ export default function CreateCampaignModal({ open, onClose, onCreated }: Props)
     }
   }, [mediaFile]);
 
+  const MEDIA_LIMITS_MB: Record<'image' | 'video' | 'audio' | 'document', number> = {
+    image: 2,
+    video: 6,
+    audio: 3,
+    document: 3,
+  };
+
+  const MEDIA_ACCEPTS = "image/*,video/*,audio/*,application/pdf,application/msword,application/vnd.openxmlformats-officedocument.wordprocessingml.document,application/vnd.ms-excel,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet,application/vnd.ms-powerpoint,application/vnd.openxmlformats-officedocument.presentationml.presentation,text/plain";
+
+  const resetMediaState = () => {
+    setMediaFile(null);
+    setMediaPreview(null);
+    setMediaType(null);
+    setMediaUploadUrl(null);
+    setMediaUploadProgress(null);
+    setUploadingMedia(false);
+  };
+
+  const handleMediaChange = async (file: File | null) => {
+    if (!file) {
+      resetMediaState();
+      return;
+    }
+
+    const mime = file.type;
+    let derivedType: 'image' | 'video' | 'audio' | 'document' | null = null;
+
+    if (mime.startsWith('image/')) derivedType = 'image';
+    else if (mime.startsWith('video/')) derivedType = 'video';
+    else if (mime.startsWith('audio/')) derivedType = 'audio';
+    else if (mime.startsWith('application/') || mime.startsWith('text/')) derivedType = 'document';
+
+    if (!derivedType) {
+      toast({
+        title: 'Unsupported file',
+        description: 'Please upload image, video, audio, or document files only.',
+        variant: 'destructive',
+      });
+      return;
+    }
+
+    const limitMb = MEDIA_LIMITS_MB[derivedType];
+    const fileSizeMb = file.size / (1024 * 1024);
+
+    if (fileSizeMb > limitMb) {
+      toast({
+        title: 'File too large',
+        description: `Selected ${derivedType} exceeds ${limitMb} MB limit. Choose a smaller file.` ,
+        variant: 'destructive',
+      });
+      return;
+    }
+
+    setMediaUploadUrl(null);
+    setMediaUploadProgress(0);
+    setMediaFile(file);
+    setMediaType(derivedType === 'audio' ? 'document' : derivedType === 'image' ? 'image' : derivedType === 'video' ? 'video' : 'document');
+
+    const requestId = mediaUploadRequestRef.current + 1;
+    mediaUploadRequestRef.current = requestId;
+
+    try {
+      setUploadingMedia(true);
+      const uploaded = await mediaAPI.upload(file, (progress) => {
+        if (mediaUploadRequestRef.current !== requestId) return;
+        setMediaUploadProgress(progress);
+      });
+
+      if (mediaUploadRequestRef.current !== requestId) {
+        return;
+      }
+
+      setMediaUploadUrl(uploaded.url);
+      setMediaUploadProgress(100);
+    } catch (error: any) {
+      if (mediaUploadRequestRef.current !== requestId) {
+        return;
+      }
+
+      resetMediaState();
+      toast({
+        title: 'Upload failed',
+        description: error?.response?.data?.message || error?.message || 'Unable to upload media file.',
+        variant: 'destructive',
+      });
+    } finally {
+      if (mediaUploadRequestRef.current === requestId) {
+        setUploadingMedia(false);
+      }
+    }
+  };
+
   const canSubmit = useMemo(() => {
     if (!campaignName) return false;
     if (!numberId) return false;
     if (mode === "template" && !template) return false;
-    // For custom mode, either caption or media is required (or both)
     if (mode === "custom" && !caption && !mediaFile) return false;
-    
-    // Check contacts
+    if (uploadingMedia) return false;
+    if (mediaFile && !mediaUploadUrl) return false;
+
     if (useExistingContacts && !selectedContactFile) return false;
     if (!useExistingContacts && !contactsFile) return false;
-    
-    return true;
-  }, [campaignName, numberId, mode, template, caption, mediaFile, useExistingContacts, selectedContactFile, contactsFile]);
 
-  const handleContactsChange = async (file: File | null) => {
-    setContactsFile(file);
-    setContactsCount(0);
-    if (!file) return;
-    if (file.name.toLowerCase().endsWith(".csv")) {
-      try {
-        // Show loading state
-        toast({ title: "Processing contacts", description: "Analyzing contact file...", duration: 2000 });
-        
-        // Estimate count without loading entire file
-        const estimatedCount = await estimateContactsFromCsv(file);
-        setContactsCount(estimatedCount);
-        
-        if (estimatedCount > 100000) {
-          toast({ 
-            title: "Large contact list detected", 
-            description: `Estimated ${estimatedCount.toLocaleString()} contacts. Processing may take time.`,
-            duration: 5000
-          });
-        }
-      } catch (err) {
-        toast({ title: "Error processing contacts", description: "Please try a different file format.", variant: "destructive" });
-      }
-    } else if (file.name.toLowerCase().match(/\.xlsx?$|\.xls$/)) {
-      toast({ title: "Excel supported soon", description: "For now, upload CSV. We'll add Excel parsing next.", variant: "default" });
-    } else {
-      toast({ title: "Unsupported file", description: "Upload CSV (comma or tab separated).", variant: "destructive" });
-    }
-  };
+    return true;
+  }, [
+    campaignName,
+    numberId,
+    mode,
+    template,
+    caption,
+    mediaFile,
+    mediaUploadUrl,
+    uploadingMedia,
+    useExistingContacts,
+    selectedContactFile,
+    contactsFile,
+  ]);
 
   const onSubmit = async () => {
     try {
@@ -243,15 +324,16 @@ export default function CreateCampaignModal({ open, onClose, onCreated }: Props)
           duration: 5000
         });
       }
-      // Note: media upload endpoint not wired yet; send empty media_url for now
       const payload: any = {
         campaign_name: campaignName,
         name: campaignName,
         templateId: mode === "template" ? Number(template) || undefined : undefined,
         caption: mode === "custom" ? caption : undefined,
-        media_url: undefined,
+        media_url: mediaUploadUrl ?? undefined,
         media_type: mediaFile ? mediaType : undefined,
         media_name: mediaFile ? mediaFile.name : undefined,
+        media_mime_type: mediaFile ? mediaFile.type : undefined,
+        media_size: mediaFile ? mediaFile.size : undefined,
         scheduled_start: startAt || undefined,
         scheduled_end: endAt || undefined,
         contact_file: useExistingContacts ? selectedContactFile : undefined,
@@ -264,43 +346,72 @@ export default function CreateCampaignModal({ open, onClose, onCreated }: Props)
       onCreated?.(created);
 
       if (runNow) {
-        // persist a running campaign locally so Active Campaigns can show it immediately
-        const storeKey = "running_campaigns";
-        const existing: any[] = JSON.parse(localStorage.getItem(storeKey) || "[]");
-        // Get contact count based on selection method
+        // Determine recipients count based on selection
         let totalContactCount = contactsCount;
         if (useExistingContacts && selectedContactFile) {
           const selectedFile = contactFiles.find(f => f.filename === selectedContactFile);
-          if (selectedFile) {
-            totalContactCount = selectedFile.count;
-          }
+          if (selectedFile) totalContactCount = selectedFile.count;
         }
-        
-        const running = {
-          id: created.id,
-          name: created.campaign_name,
-          progress: 0,
-          sent: 0,
-          failed: 0,
-          retries: 0,
-          startedAt: new Date().toLocaleString(),
-          status: "running",
-          template: mode === "template" ? template : "custom",
-          totalContacts: totalContactCount || 100, // fallback estimate
-          numberId,
-          // Include media information for ActiveCampaigns display
-          media_type: mediaFile ? mediaType : undefined,
-          media_name: mediaFile ? mediaFile.name : undefined,
-          caption: mode === "custom" ? caption : undefined,
-          contact_file: useExistingContacts ? selectedContactFile : undefined,
-          ctaButtons,
-        };
-        
-        // Limit localStorage size by keeping only recent campaigns
-        const maxCampaigns = 10;
-        const updatedCampaigns = [running, ...existing].slice(0, maxCampaigns);
-        localStorage.setItem(storeKey, JSON.stringify(updatedCampaigns));
-        navigate("/active-campaigns");
+
+        try {
+          // Call backend to run the campaign so credits and virtual number logic apply
+          const runResult = await campaignsAPI.run({
+            campaignId: created.id,
+            // omit virtualNumberId to let backend resolve primary/auto-switch
+            recipientsCount: Math.max(1, totalContactCount || 0),
+            startImmediately: true,
+          });
+
+          const assigned = runResult.assignedNumber;
+          const senderContext = runResult.dispatch?.sender;
+
+          // persist a running campaign locally so Active Campaigns can show it immediately
+          const storeKey = "running_campaigns";
+          const existing: any[] = JSON.parse(localStorage.getItem(storeKey) || "[]");
+          const running = {
+            id: created.id,
+            name: created.campaign_name,
+            progress: 0,
+            sent: 0,
+            failed: 0,
+            retries: 0,
+            startedAt: new Date().toLocaleString(),
+            status: "running",
+            template: mode === "template" ? template : "custom",
+            totalContacts: totalContactCount || 100, // fallback estimate
+            numberId: assigned?.id ?? numberId,
+            numberLabel: assigned?.phoneNumberId ?? WHATSAPP_NUMBERS.find((n) => n.id === numberId)?.label,
+            // Include media information for ActiveCampaigns display
+            media_type: mediaFile ? mediaType : undefined,
+            media_name: mediaFile ? mediaFile.name : undefined,
+            media_url: mediaUploadUrl ?? undefined,
+            caption: mode === "custom" ? caption : undefined,
+            contact_file: useExistingContacts ? selectedContactFile : undefined,
+            ctaButtons,
+            dispatchMeta: runResult.dispatch
+              ? {
+                  totalBatches: runResult.dispatch.totalBatches,
+                  batchSize: runResult.dispatch.batchSize,
+                  jobIds: runResult.dispatch.jobIds,
+                  sender: senderContext,
+                }
+              : undefined,
+          };
+          const maxCampaigns = 10;
+          const updatedCampaigns = [running, ...existing].slice(0, maxCampaigns);
+          localStorage.setItem(storeKey, JSON.stringify(updatedCampaigns));
+          navigate("/active-campaigns");
+        } catch (err: any) {
+          // Surface a clear message when credits are insufficient
+          const message = err?.response?.data?.message || err?.message || 'Failed to start campaign';
+          toast({
+            title: 'Cannot start campaign',
+            description: message,
+            variant: 'destructive',
+          });
+          // Do not navigate on failure
+          return;
+        }
       }
 
       onClose();
@@ -429,16 +540,25 @@ export default function CreateCampaignModal({ open, onClose, onCreated }: Props)
                 <Textarea rows={4} placeholder="Write your message" value={caption} onChange={(e) => setCaption(e.target.value)} />
               </div>
               <div className="grid gap-2">
-                <Label>Attachment (optional)</Label>
+                <div className="flex items-center justify-between">
+                  <Label>Attachment (optional)</Label>
+                  <span className="text-xs text-muted-foreground">Image ≤ 2MB • Video ≤ 6MB • Audio ≤ 3MB • Document ≤ 3MB</span>
+                </div>
                 <Input 
                   type="file" 
-                  accept="image/*,video/*,application/pdf,application/msword,application/vnd.openxmlformats-officedocument.wordprocessingml.document,application/vnd.ms-excel,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet,application/vnd.ms-powerpoint,application/vnd.openxmlformats-officedocument.presentationml.presentation,text/plain" 
-                  onChange={(e) => setMediaFile(e.target.files?.[0] || null)} 
+                  accept={MEDIA_ACCEPTS}
+                  onChange={(e) => handleMediaChange(e.target.files?.[0] || null)} 
                 />
                 {mediaFile && (
                   <div className="text-xs text-muted-foreground">
                     Selected file: {mediaFile.name} ({(mediaFile.size / 1024).toFixed(1)} KB)
                   </div>
+                )}
+                {uploadingMedia && (
+                  <div className="text-xs text-blue-600">Uploading... {mediaUploadProgress ?? 0}%</div>
+                )}
+                {!uploadingMedia && mediaUploadUrl && (
+                  <div className="text-xs text-emerald-600">Upload complete</div>
                 )}
                 {mediaType === 'image' && mediaPreview && (
                   <div className="border rounded p-2">

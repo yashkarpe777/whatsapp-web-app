@@ -52,6 +52,22 @@ export class AdminController {
     return this.adminService.transferCredits(creditTransferDto, req.user.username);
   }
 
+  @Post('credits/deduct')
+  async deductCredits(
+    @Body() creditTransferDto: CreditTransferDto,
+    @Request() req
+  ) {
+    return this.adminService.deductCredits(creditTransferDto, req.user.username);
+  }
+
+  @Put('users/:id/credits')
+  async setUserCredits(
+    @Param('id', ParseIntPipe) id: number,
+    @Body() body: { credits: number }
+  ) {
+    return this.adminService.setUserCredits(id, body.credits);
+  }
+
   @Get('credits')
   async getCreditsInfo() {
     return this.adminService.getCreditsInfo();

@@ -6,9 +6,10 @@ import { Campaign } from './entities/campaign.entity';
 import { MessageTemplate } from './entities/message-template.entity';
 import { User } from '../auth/entities/user.entity';
 import { NumbersModule } from '../numbers/numbers.module';
+import { DispatchModule } from '../dispatch/dispatch.module';
 
 @Module({
-  imports: [TypeOrmModule.forFeature([Campaign, MessageTemplate, User]), NumbersModule],
+  imports: [TypeOrmModule.forFeature([Campaign, MessageTemplate, User]), NumbersModule, DispatchModule],
   controllers: [CampaignsController],
   providers: [CampaignsService],
 })

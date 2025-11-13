@@ -7,6 +7,8 @@ import { ContactsModule } from './contacts/contacts.module';
 import { NumbersModule } from './numbers/numbers.module';
 import { TemplatesModule } from './templates/templates.module';
 import { CommonModule } from './common/common.module';
+import { ReportsModule } from './reports/reports.module';
+import { MediaModule } from './media/media.module';
 
 @Module({
   imports: [
@@ -33,6 +35,8 @@ import { CommonModule } from './common/common.module';
     NumbersModule,
     TemplatesModule,
     CommonModule,
+    ReportsModule,
+    MediaModule,
   ],
 })
 export class AppModule {}

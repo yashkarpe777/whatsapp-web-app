@@ -52,6 +52,20 @@ export class AdminService {
     });
   }
 
+  async setUserCredits(id: number, credits: number): Promise<User> {
+    if (credits < 0) {
+      throw new BadRequestException('Credits cannot be negative');
+    }
+
+    const user = await this.userRepository.findOne({ where: { id } });
+    if (!user) {
+      throw new NotFoundException(`User with ID ${id} not found`);
+    }
+
+    user.credits = credits;
+    return this.userRepository.save(user);
+  }
+
   async getUserById(id: number): Promise<User> {
     const user = await this.userRepository.findOne({
       where: { id },
@@ -109,6 +123,37 @@ export class AdminService {
       previousCredits,
       currentCredits: targetUser.credits,
       transferAmount: amount,
+      transferredBy,
+    };
+  }
+
+  async deductCredits(creditTransferDto: CreditTransferDto, transferredBy: string) {
+    const { userId, amount } = creditTransferDto;
+
+    if (!amount || amount <= 0) {
+      throw new BadRequestException('Deduction amount must be greater than 0');
+    }
+
+    const targetUser = await this.userRepository.findOne({ where: { id: userId } });
+    if (!targetUser) {
+      throw new NotFoundException(`User with ID ${userId} not found`);
+    }
+
+    if ((targetUser.credits ?? 0) < amount) {
+      throw new BadRequestException('Insufficient credits to deduct');
+    }
+
+    const previousCredits = targetUser.credits;
+    targetUser.credits -= amount;
+
+    await this.userRepository.save(targetUser);
+
+    return {
+      userId: targetUser.id,
+      username: targetUser.username,
+      previousCredits,
+      currentCredits: targetUser.credits,
+      deductedAmount: amount,
       transferredBy,
     };
   }
