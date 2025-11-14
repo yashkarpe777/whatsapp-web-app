@@ -8,11 +8,16 @@ import {
   IsNotEmpty,
   IsOptional,
   IsString,
+  IsIn,
   MaxLength,
   Min,
   ValidateNested,
+  ValidateIf,
 } from 'class-validator';
 import { Type } from 'class-transformer';
+
+export const SUPPORTED_MEDIA_TYPES = ['image', 'video', 'document', 'audio'] as const;
+export type SupportedMediaType = typeof SUPPORTED_MEDIA_TYPES[number];
 
 export class CampaignCtaButtonDto {
   @IsEnum(['URL', 'PHONE', 'QUICK_REPLY'])
@@ -53,16 +58,19 @@ export class CreateCampaignDto {
   @IsString()
   caption?: string;
 
-  @IsOptional()
+  @ValidateIf((campaign) => !!campaign.media_type)
   @IsString()
+  @IsNotEmpty()
   media_url?: string;
 
   @IsOptional()
   @IsString()
-  media_type?: string;
+  @IsIn([...SUPPORTED_MEDIA_TYPES])
+  media_type?: SupportedMediaType;
 
-  @IsOptional()
+  @ValidateIf((campaign) => !!campaign.media_type)
   @IsString()
+  @IsNotEmpty()
   media_name?: string;
 
   @IsOptional()

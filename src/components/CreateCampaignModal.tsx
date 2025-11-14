@@ -84,7 +84,7 @@ export default function CreateCampaignModal({ open, onClose, onCreated }: Props)
   const [caption, setCaption] = useState("");
   const [mediaFile, setMediaFile] = useState<File | null>(null);
   const [mediaPreview, setMediaPreview] = useState<string | null>(null);
-  const [mediaType, setMediaType] = useState<'image' | 'video' | 'document' | null>(null);
+  const [mediaType, setMediaType] = useState<'image' | 'video' | 'document' | 'audio' | null>(null);
   const [mediaUploadUrl, setMediaUploadUrl] = useState<string | null>(null);
   const [mediaUploadProgress, setMediaUploadProgress] = useState<number | null>(null);
   const [uploadingMedia, setUploadingMedia] = useState(false);
@@ -250,7 +250,11 @@ export default function CreateCampaignModal({ open, onClose, onCreated }: Props)
     setMediaUploadUrl(null);
     setMediaUploadProgress(0);
     setMediaFile(file);
-    setMediaType(derivedType === 'audio' ? 'document' : derivedType === 'image' ? 'image' : derivedType === 'video' ? 'video' : 'document');
+    if (derivedType) {
+      setMediaType(derivedType);
+    } else {
+      setMediaType('document');
+    }
 
     const requestId = mediaUploadRequestRef.current + 1;
     mediaUploadRequestRef.current = requestId;

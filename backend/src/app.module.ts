@@ -9,6 +9,7 @@ import { TemplatesModule } from './templates/templates.module';
 import { CommonModule } from './common/common.module';
 import { ReportsModule } from './reports/reports.module';
 import { MediaModule } from './media/media.module';
+import { ScheduleModule } from '@nestjs/schedule';
 
 @Module({
   imports: [
@@ -29,6 +30,7 @@ import { MediaModule } from './media/media.module';
       }),
       inject: [ConfigService],
     }),
+    ScheduleModule.forRoot(),
     AuthModule,
     CampaignsModule,
     ContactsModule,

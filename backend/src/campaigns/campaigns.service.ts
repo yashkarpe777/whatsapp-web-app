@@ -5,7 +5,7 @@ import {
   NotFoundException,
 } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { Repository } from 'typeorm';
+import { DataSource, Repository } from 'typeorm';
 import { Campaign } from './entities/campaign.entity';
 import { CreateCampaignDto } from './dto/create.campaign.dto';
 import { UpdateCampaignDto } from './dto/update.campaign.dto';
@@ -14,6 +14,7 @@ import { User } from '../auth/entities/user.entity';
 import { NumbersService } from '../numbers/numbers.service';
 import { DispatchService } from '../dispatch/dispatch.service';
 import { VirtualNumberStatus } from '../numbers/enums';
+import { EnqueueCampaignResult } from '../dispatch/types/dispatch-job';
 import {
   MessageTemplate,
   TemplateApprovalStatus,
@@ -37,6 +38,7 @@ export class CampaignsService {
     private templateRepo: Repository<MessageTemplate>,
     private readonly numbersService: NumbersService,
     private readonly dispatchService: DispatchService,
+    private readonly dataSource: DataSource,
   ) {}
 
   async create(dto: CreateCampaignDto, user: User) {
@@ -236,46 +238,77 @@ export class CampaignsService {
       throw new BadRequestException('recipientsCount must be greater than zero');
     }
 
-    await this.deductCredits(user.id, recipientsCount);
-
     const assignedNumber = await this.resolveVirtualNumber(dto.virtualNumberId);
 
     const shouldStartNow = dto.startImmediately !== false;
+    const { savedCampaign, dispatchResult } = await this.dataSource.transaction(async (manager) => {
+      const campaignRepo = manager.getRepository(Campaign);
+      const userRepo = manager.getRepository(User);
 
-    campaign.status = shouldStartNow ? 'running' : 'scheduled';
-    campaign.recipientsCount = recipientsCount;
-    if (shouldStartNow) {
-      campaign.lastRunAt = new Date();
-    }
-    campaign.sentCount = 0;
-    campaign.successCount = 0;
-    campaign.failedCount = 0;
-    campaign.readCount = 0;
+      const managedCampaign = await campaignRepo.findOne({
+        where: { id: campaign.id, user: { id: user.id } },
+        lock: { mode: 'pessimistic_write' },
+      });
+      if (!managedCampaign) {
+        throw new NotFoundException(`Campaign ${campaign.id} not found for this user`);
+      }
 
-    const saved = await this.campaignRepo.save(campaign);
+      const account = await userRepo.findOne({ where: { id: user.id }, lock: { mode: 'pessimistic_write' } });
+      if (!account) {
+        throw new NotFoundException('User not found');
+      }
+      if (account.credits < recipientsCount) {
+        throw new ForbiddenException(
+          `You don't have enough credits to run this campaign. Contact admin for more credits. (Available: ${account.credits}, Required: ${recipientsCount})`,
+        );
+      }
+      account.credits -= recipientsCount;
+      await userRepo.save(account);
 
-    let dispatchResult = null;
+      managedCampaign.status = shouldStartNow ? 'running' : 'scheduled';
+      managedCampaign.recipientsCount = recipientsCount;
+      if (shouldStartNow) {
+        managedCampaign.lastRunAt = new Date();
+      }
+      managedCampaign.sentCount = 0;
+      managedCampaign.successCount = 0;
+      managedCampaign.failedCount = 0;
+      managedCampaign.readCount = 0;
+
+      const saved = await campaignRepo.save(managedCampaign);
+
+      let dispatchMeta: EnqueueCampaignResult | null = null;
+      if (shouldStartNow) {
+        dispatchMeta = await this.dispatchService.enqueueCampaign(
+          {
+            campaignId: saved.id,
+            userId: user.id,
+            recipientsCount,
+            preferredNumberId: dto.virtualNumberId,
+            enqueueReason: 'manual_run',
+            assignedNumberId: assignedNumber.id,
+            assignedNumberLabel: assignedNumber.phoneNumberId,
+            businessNumberId: assignedNumber.businessNumber?.id,
+            businessNumber:
+              assignedNumber.businessNumber?.displayPhoneNumber ||
+              assignedNumber.businessNumber?.businessName,
+          },
+          manager,
+        );
+      }
+
+      return {
+        savedCampaign: saved,
+        dispatchResult: dispatchMeta,
+      };
+    });
 
     if (shouldStartNow) {
       await this.numbersService.recordMessageUsage(assignedNumber.id, recipientsCount);
-
-      dispatchResult = this.dispatchService.enqueueCampaign({
-        campaignId: saved.id,
-        userId: user.id,
-        recipientsCount,
-        preferredNumberId: dto.virtualNumberId,
-        enqueueReason: 'manual_run',
-        assignedNumberId: assignedNumber.id,
-        assignedNumberLabel: assignedNumber.phoneNumberId,
-        businessNumberId: assignedNumber.businessNumber?.id,
-        businessNumber:
-          assignedNumber.businessNumber?.displayPhoneNumber ||
-          assignedNumber.businessNumber?.businessName,
-      });
     }
 
     return {
-      campaign: saved,
+      campaign: savedCampaign,
       assignedNumber,
       dispatch: dispatchResult,
     };
@@ -304,24 +337,6 @@ export class CampaignsService {
     }
 
     return campaign;
-  }
-
-  private async deductCredits(userId: number, amount: number) {
-    const account = await this.userRepo.findOne({ where: { id: userId } });
-    if (!account) {
-      throw new NotFoundException('User not found');
-    }
-
-    if (account.credits < amount) {
-      throw new ForbiddenException(
-        `You don't have enough credits to run this campaign. Contact admin for more credits. (Available: ${account.credits}, Required: ${amount})`,
-      );
-    }
-
-    account.credits -= amount;
-    await this.userRepo.save(account);
-
-    return account;
   }
 
   private async resolveVirtualNumber(preferredId?: number): Promise<VirtualNumber> {

@@ -20,6 +20,14 @@ export interface CampaignDispatchBatch {
   error?: string;
 }
 
+export interface DispatchMessagePayload {
+  caption?: string | null;
+  media_url?: string | null;
+  media_type?: string | null;
+  media_name?: string | null;
+  cta?: Record<string, any>[] | null;
+}
+
 export interface DispatchSenderContext {
   virtualNumberId: number;
   virtualNumberLabel?: string;
@@ -41,6 +49,7 @@ export interface EnqueueCampaignOptions {
   businessNumberId?: number;
   businessNumber?: string;
   simulateBan?: boolean;
+  messagePayload?: DispatchMessagePayload;
 }
 
 export interface EnqueueCampaignResult {
