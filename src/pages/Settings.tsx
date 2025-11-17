@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState, ChangeEvent } from "react";
+import { useEffect, useMemo, useState, ChangeEvent, Fragment } from "react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -21,8 +21,25 @@ import {
   VirtualNumberQuality,
   VirtualNumberStatus,
   CreateVirtualNumberPayload,
+  templatesAPI,
+  MessageTemplate,
+  TemplatePayloadValidationInput,
+  TemplatePayloadValidationResult,
+  TemplateSyncSummary,
+  TemplateApprovalStatus,
+  ProviderValidationStatus,
 } from "@/services/api";
-import { Building2, Loader2, Phone, Plus, RefreshCcw } from "lucide-react";
+import {
+  AlertTriangle,
+  Building2,
+  CheckCircle2,
+  FileText,
+  Loader2,
+  MessageSquare,
+  Phone,
+  Plus,
+  RefreshCcw,
+} from "lucide-react";
 
 const STATUS_STYLES: Record<VirtualNumberStatus, string> = {
   active: "bg-green-100 text-green-800 border-green-200",
@@ -37,6 +54,21 @@ const QUALITY_STYLES: Record<VirtualNumberQuality, string> = {
   medium: "bg-blue-100 text-blue-800 border-blue-200",
   low: "bg-orange-100 text-orange-800 border-orange-200",
   unknown: "bg-slate-100 text-slate-700 border-slate-200",
+};
+
+const TEMPLATE_APPROVAL_STYLES: Record<TemplateApprovalStatus, string> = {
+  approved: "bg-green-100 text-green-800 border-green-200",
+  pending: "bg-yellow-100 text-yellow-800 border-yellow-200",
+  rejected: "bg-red-100 text-red-800 border-red-200",
+};
+
+const PROVIDER_STATUS_STYLES: Record<ProviderValidationStatus, string> = {
+  approved: "bg-green-100 text-green-800 border-green-200",
+  pending: "bg-yellow-100 text-yellow-800 border-yellow-200",
+  in_progress: "bg-blue-100 text-blue-800 border-blue-200",
+  rejected: "bg-red-100 text-red-800 border-red-200",
+  failed: "bg-red-100 text-red-800 border-red-200",
+  not_required: "bg-slate-100 text-slate-700 border-slate-200",
 };
 
 type BusinessFormState = {
@@ -83,13 +115,22 @@ const Settings = () => {
   const [newNumberForm, setNewNumberForm] = useState<CreateVirtualNumberPayload>(DEFAULT_NEW_NUMBER);
   const [creatingNumber, setCreatingNumber] = useState(false);
 
-  const [activeTab, setActiveTab] = useState<"business" | "virtual">("business");
+  const [templates, setTemplates] = useState<MessageTemplate[]>([]);
+  const [templatesLoading, setTemplatesLoading] = useState(true);
+  const [templatesRefreshing, setTemplatesRefreshing] = useState(false);
+  const [templatesSyncing, setTemplatesSyncing] = useState(false);
+  const [templateValidations, setTemplateValidations] = useState<Record<number, TemplatePayloadValidationResult>>({});
+  const [validatingTemplateId, setValidatingTemplateId] = useState<number | null>(null);
+  const [templateSyncSummaries, setTemplateSyncSummaries] = useState<TemplateSyncSummary[] | null>(null);
+
+  const [activeTab, setActiveTab] = useState<"business" | "virtual" | "templates">("business");
 
   const primaryNumber = useMemo(() => virtualNumbers.find((item) => item.isPrimary), [virtualNumbers]);
 
   useEffect(() => {
     void loadBusiness();
     void loadNumbers();
+    void loadTemplates();
   }, []);
 
   const loadBusiness = async () => {
@@ -138,6 +179,28 @@ const Settings = () => {
     } finally {
       setNumbersLoading(false);
       setNumbersRefreshing(false);
+    }
+  };
+
+  const loadTemplates = async (showSpinner = true) => {
+    if (showSpinner) {
+      setTemplatesLoading(true);
+    } else {
+      setTemplatesRefreshing(true);
+    }
+
+    try {
+      const data = await templatesAPI.listAll();
+      setTemplates(data);
+    } catch (error: any) {
+      toast({
+        title: "Failed to load templates",
+        description: error?.message || "Unable to fetch templates",
+        variant: "destructive",
+      });
+    } finally {
+      setTemplatesLoading(false);
+      setTemplatesRefreshing(false);
     }
   };
 
@@ -255,6 +318,74 @@ const Settings = () => {
     }
   };
 
+  const handleSyncTemplates = async () => {
+    setTemplatesSyncing(true);
+    try {
+      const summaries = await templatesAPI.sync();
+      setTemplateSyncSummaries(summaries);
+
+      const created = summaries.reduce((acc, item) => acc + item.created, 0);
+      const updated = summaries.reduce((acc, item) => acc + item.updated, 0);
+
+      toast({
+        title: "Template sync completed",
+        description: `Created ${created} • Updated ${updated} template(s).`,
+      });
+
+      await loadTemplates(false);
+    } catch (error: any) {
+      toast({
+        title: "Template sync failed",
+        description: error?.message || "Unable to sync templates",
+        variant: "destructive",
+      });
+    } finally {
+      setTemplatesSyncing(false);
+    }
+  };
+
+  const handleValidateTemplate = async (template: MessageTemplate) => {
+    setValidatingTemplateId(template.id);
+    try {
+      const sampleVariables = template.sampleParameters?.length
+        ? template.sampleParameters.reduce((acc, param) => {
+          if (param.name) {
+            acc[param.name] = param.value ?? "";
+          }
+          return acc;
+        }, {} as Record<string, string | number | boolean | null>)
+        : undefined;
+
+      const payload: TemplatePayloadValidationInput = {
+        variables: sampleVariables,
+        media: template.attachmentUrl
+          ? {
+            attachmentUrl: template.attachmentUrl,
+          }
+          : undefined,
+      };
+
+      const result = await templatesAPI.validate(template.id, payload);
+      setTemplateValidations((prev) => ({ ...prev, [template.id]: result }));
+
+      toast({
+        title: result.isValid ? "Template is ready" : "Template validation issues",
+        description: result.isValid
+          ? `${template.name} passed validation checks.`
+          : `${result.errors.length} error(s) detected.`,
+        variant: result.isValid ? "default" : "destructive",
+      });
+    } catch (error: any) {
+      toast({
+        title: "Validation failed",
+        description: error?.message || `Unable to validate ${template.name}`,
+        variant: "destructive",
+      });
+    } finally {
+      setValidatingTemplateId(null);
+    }
+  };
+
   const lastUsedLabel = primaryNumber?.lastUsedAt
     ? new Date(primaryNumber.lastUsedAt).toLocaleString()
     : "No recent usage";
@@ -287,12 +418,21 @@ const Settings = () => {
                 <Phone className="h-4 w-4" />
                 Virtual Numbers
               </Button>
+              <Button
+                onClick={() => setActiveTab("templates")}
+                variant={activeTab === "templates" ? "default" : "outline"}
+                className="flex items-center gap-2"
+              >
+                <MessageSquare className="h-4 w-4" />
+                Templates
+              </Button>
             </div>
             <Button
               variant="outline"
               onClick={() => {
                 void loadBusiness();
                 void loadNumbers();
+                void loadTemplates();
               }}
               disabled={businessLoading || numbersLoading}
             >
@@ -301,7 +441,7 @@ const Settings = () => {
           </div>
         </div>
 
-        {activeTab === "business" ? (
+        {activeTab === "business" && (
           <div className="space-y-6">
             <Card className="min-h-[420px]">
               <CardHeader>
@@ -395,7 +535,9 @@ const Settings = () => {
               </CardContent>
             </Card>
           </div>
-        ) : (
+        )}
+
+        {activeTab === "virtual" && (
           <div className="space-y-6">
             <Card className="min-h-[420px]">
               <CardHeader className="space-y-1">
@@ -407,19 +549,6 @@ const Settings = () => {
                     </CardDescription>
                   </div>
                   <div className="flex gap-2">
-                    <Button
-                      variant="outline"
-                      size="sm"
-                      onClick={() => void loadNumbers(false)}
-                      disabled={numbersRefreshing}
-                    >
-                      {numbersRefreshing ? (
-                        <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                      ) : (
-                        <RefreshCcw className="mr-2 h-4 w-4" />
-                      )}
-                      Refresh
-                    </Button>
                     <Button variant="secondary" size="sm" onClick={handleManualSwitch} disabled={switching}>
                       {switching ? (
                         <Loader2 className="mr-2 h-4 w-4 animate-spin" />
@@ -611,6 +740,235 @@ const Settings = () => {
                             </td>
                           </tr>
                         ))
+                      )}
+                    </tbody>
+                  </table>
+                </div>
+              </CardContent>
+            </Card>
+          </div>
+        )}
+
+        {activeTab === "templates" && (
+          <div className="space-y-6">
+            <Card className="min-h-[420px]">
+              <CardHeader className="space-y-3">
+                <div className="flex items-center justify-between gap-4">
+                  <div>
+                    <CardTitle>Message Templates</CardTitle>
+                    <CardDescription>
+                      View approval status, sync with providers, and validate before running campaigns.
+                    </CardDescription>
+                  </div>
+                  <div className="flex gap-2">
+                    <Button size="sm" onClick={handleSyncTemplates} disabled={templatesSyncing}>
+                      {templatesSyncing ? (
+                        <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                      ) : (
+                        <RefreshCcw className="mr-2 h-4 w-4" />
+                      )}
+                      Sync Providers
+                    </Button>
+                  </div>
+                </div>
+                {templateSyncSummaries && templateSyncSummaries.length > 0 && (
+                  <div className="rounded-md border border-dashed p-3 text-sm text-muted-foreground">
+                    <p className="font-medium text-foreground">Last sync results</p>
+                    <div className="mt-2 space-y-1">
+                      {templateSyncSummaries.map((summary) => (
+                        <div key={summary.provider} className="flex flex-wrap items-center justify-between gap-2">
+                          <span className="capitalize font-medium text-foreground">{summary.provider}</span>
+                          <span>
+                            {summary.created} created • {summary.updated} updated • {summary.skipped} skipped
+                          </span>
+                          {summary.errors.length ? (
+                            <span className="text-destructive">{summary.errors.length} error(s)</span>
+                          ) : (
+                            <span className="text-emerald-600">OK</span>
+                          )}
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                )}
+              </CardHeader>
+              <CardContent>
+                <div className="rounded-md border">
+                  <table className="w-full text-sm">
+                    <thead>
+                      <tr className="border-b bg-muted/50 text-muted-foreground">
+                        <th className="h-10 px-4 text-left font-medium">Template</th>
+                        <th className="h-10 px-4 text-left font-medium">Approval</th>
+                        <th className="h-10 px-4 text-left font-medium">Providers</th>
+                        <th className="h-10 px-4 text-left font-medium">Updated</th>
+                        <th className="h-10 px-4 text-left font-medium">Actions</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {templatesLoading ? (
+                        <tr>
+                          <td colSpan={5} className="p-6 text-center text-muted-foreground">
+                            <Loader2 className="mr-2 inline-block h-4 w-4 animate-spin" /> Loading templates...
+                          </td>
+                        </tr>
+                      ) : templates.length === 0 ? (
+                        <tr>
+                          <td colSpan={5} className="p-6 text-center text-muted-foreground">
+                            No templates found. Sync providers to import the latest templates.
+                          </td>
+                        </tr>
+                      ) : (
+                        templates.map((template) => {
+                          const validation = templateValidations[template.id];
+                          return (
+                            <Fragment key={template.id}>
+                              <tr className="border-b">
+                                <td className="p-4">
+                                  <div className="flex flex-col">
+                                    <span className="font-medium">{template.name}</span>
+                                    <span className="text-xs text-muted-foreground">
+                                      {template.category ? `${template.category} • ` : ""}
+                                      {template.language}
+                                    </span>
+                                    {template.rejectionReason && (
+                                      <span className="mt-1 text-xs text-destructive">{template.rejectionReason}</span>
+                                    )}
+                                  </div>
+                                </td>
+                                <td className="p-4">
+                                  <Badge variant="outline" className={TEMPLATE_APPROVAL_STYLES[template.approvalStatus]}>
+                                    {template.approvalStatus}
+                                  </Badge>
+                                </td>
+                                <td className="p-4">
+                                  <div className="flex flex-wrap gap-2">
+                                    <Badge
+                                      variant="outline"
+                                      className={PROVIDER_STATUS_STYLES[template.metaStatus]}
+                                    >
+                                      Meta: {template.metaStatus}
+                                    </Badge>
+                                    <Badge
+                                      variant="outline"
+                                      className={PROVIDER_STATUS_STYLES[template.dltStatus]}
+                                    >
+                                      DLT: {template.dltStatus}
+                                    </Badge>
+                                    <Badge
+                                      variant="outline"
+                                      className={PROVIDER_STATUS_STYLES[template.bspStatus]}
+                                    >
+                                      BSP: {template.bspStatus}
+                                    </Badge>
+                                  </div>
+                                </td>
+                                <td className="p-4">
+                                  {template.updatedAt ? new Date(template.updatedAt).toLocaleString() : "—"}
+                                </td>
+                                <td className="p-4">
+                                  <div className="flex flex-wrap gap-2">
+                                    <Button
+                                      size="sm"
+                                      variant="outline"
+                                      onClick={() => handleValidateTemplate(template)}
+                                      disabled={validatingTemplateId === template.id}
+                                    >
+                                      {validatingTemplateId === template.id ? (
+                                        <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                                      ) : (
+                                        <CheckCircle2 className="mr-2 h-4 w-4" />
+                                      )}
+                                      Validate
+                                    </Button>
+                                    <Button
+                                      size="sm"
+                                      variant="outline"
+                                      onClick={() => setTemplateValidations((prev) => ({ ...prev, [template.id]: undefined as any }))}
+                                      disabled={!validation}
+                                    >
+                                      Clear
+                                    </Button>
+                                  </div>
+                                </td>
+                              </tr>
+                              {validation && (
+                                <tr className="bg-muted/40">
+                                  <td colSpan={5} className="p-4">
+                                    <div className="space-y-3">
+                                      <div className="flex items-center gap-2 text-sm font-medium">
+                                        {validation.isValid ? (
+                                          <CheckCircle2 className="h-4 w-4 text-emerald-600" />
+                                        ) : (
+                                          <AlertTriangle className="h-4 w-4 text-destructive" />
+                                        )}
+                                        <span>
+                                          {validation.isValid
+                                            ? "Template passed validation"
+                                            : "Template validation failed"}
+                                        </span>
+                                      </div>
+                                      <div className="grid gap-4 sm:grid-cols-2">
+                                        <div>
+                                          <p className="text-xs uppercase tracking-wider text-muted-foreground">
+                                            Required Variables
+                                          </p>
+                                          <div className="mt-1 text-sm">
+                                            {validation.requiredVariables.length ? (
+                                              <div className="space-y-1">
+                                                {validation.requiredVariables.map((variable) => (
+                                                  <div key={variable}>
+                                                    {variable}
+                                                    {validation.providedVariables.includes(variable) ? (
+                                                      <span className="ml-2 text-emerald-600">provided</span>
+                                                    ) : (
+                                                      <span className="ml-2 text-destructive">missing</span>
+                                                    )}
+                                                  </div>
+                                                ))}
+                                              </div>
+                                            ) : (
+                                              <span className="text-muted-foreground">No placeholders detected</span>
+                                            )}
+                                          </div>
+                                        </div>
+                                        <div>
+                                          <p className="text-xs uppercase tracking-wider text-muted-foreground">
+                                            Media Requirement
+                                          </p>
+                                          <p className="mt-1 text-sm">
+                                            {validation.mediaRequirement.required
+                                              ? `Requires ${validation.mediaRequirement.expectedType ?? 'media'} asset`
+                                              : 'Media is optional for this template.'}
+                                          </p>
+                                          {validation.warnings.length > 0 && (
+                                            <div className="mt-2 space-y-1 text-xs text-amber-600">
+                                              {validation.warnings.map((warning, index) => (
+                                                <div key={index} className="flex items-start gap-1">
+                                                  <AlertTriangle className="mt-0.5 h-3 w-3" />
+                                                  <span>{warning}</span>
+                                                </div>
+                                              ))}
+                                            </div>
+                                          )}
+                                        </div>
+                                      </div>
+                                      {validation.errors.length > 0 && (
+                                        <div>
+                                          <p className="text-xs uppercase tracking-wider text-destructive">Errors</p>
+                                          <ul className="mt-1 list-disc space-y-1 pl-5 text-sm text-destructive">
+                                            {validation.errors.map((errorMsg, index) => (
+                                              <li key={index}>{errorMsg}</li>
+                                            ))}
+                                          </ul>
+                                        </div>
+                                      )}
+                                    </div>
+                                  </td>
+                                </tr>
+                              )}
+                            </Fragment>
+                          );
+                        })
                       )}
                     </tbody>
                   </table>

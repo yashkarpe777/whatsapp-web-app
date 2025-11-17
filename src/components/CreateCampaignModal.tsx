@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { ChangeEvent, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -6,12 +6,24 @@ import { Textarea } from "@/components/ui/textarea";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "@/components/ui/dialog";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { useToast } from "@/hooks/use-toast";
-import { CampaignCtaButton, CampaignCtaType, campaignsAPI, contactsAPI, mediaAPI } from "@/services/api";
+import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
+import {
+  CampaignCtaButton,
+  CampaignCtaType,
+  MessageTemplate,
+  TemplatePayloadValidationInput,
+  TemplatePayloadValidationResult,
+  campaignsAPI,
+  contactsAPI,
+  mediaAPI,
+  templatesAPI,
+} from "@/services/api";
 import { useNavigate } from "react-router-dom";
 import { WHATSAPP_NUMBERS } from "@/config/app";
 import { Checkbox } from "@/components/ui/checkbox";
-import { FileText, Plus, X } from "lucide-react";
+import { AlertTriangle, CheckCircle2, FileText, Loader2, Plus, X } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
+import { useAuthStore } from "@/store/authStore";
 
 interface Props {
   open: boolean;
@@ -76,6 +88,7 @@ function estimateContactsFromCsv(file: File): Promise<number> {
 export default function CreateCampaignModal({ open, onClose, onCreated }: Props) {
   const { toast } = useToast();
   const navigate = useNavigate();
+  const isAdmin = useAuthStore((state) => state.isAdmin);
 
   const [submitting, setSubmitting] = useState(false);
   const [campaignName, setCampaignName] = useState("");
@@ -94,6 +107,14 @@ export default function CreateCampaignModal({ open, onClose, onCreated }: Props)
   const [contactsFile, setContactsFile] = useState<File | null>(null);
   const [contactsCount, setContactsCount] = useState(0);
   const [runNow, setRunNow] = useState(true);
+
+  const [templates, setTemplates] = useState<MessageTemplate[]>([]);
+  const [templatesLoading, setTemplatesLoading] = useState(false);
+  const [templateVariables, setTemplateVariables] = useState<Record<string, string>>({});
+  const [templateValidation, setTemplateValidation] = useState<TemplatePayloadValidationResult | null>(null);
+  const [templateValidationError, setTemplateValidationError] = useState<string | null>(null);
+  const [templateValidationLoading, setTemplateValidationLoading] = useState(false);
+  const [validationDirty, setValidationDirty] = useState(false);
   const mediaUploadRequestRef = useRef(0);
 
   const [ctaButtons, setCtaButtons] = useState<CampaignCtaButton[]>([]);
@@ -116,9 +137,28 @@ export default function CreateCampaignModal({ open, onClose, onCreated }: Props)
         console.error("Error fetching contact files:", err);
       }
     };
-    
+
+    const fetchTemplates = async () => {
+      setTemplatesLoading(true);
+      try {
+        const data = isAdmin() ? await templatesAPI.listAll() : await templatesAPI.listApproved();
+        const approvedOnly = data.filter((tpl) => tpl.approvalStatus === 'approved');
+        setTemplates(approvedOnly);
+      } catch (err) {
+        console.error("Error fetching templates:", err);
+        toast({
+          title: 'Failed to load templates',
+          description: err instanceof Error ? err.message : 'Unable to fetch templates',
+          variant: 'destructive',
+        });
+      } finally {
+        setTemplatesLoading(false);
+      }
+    };
+
     fetchContactFiles();
-  }, []);
+    fetchTemplates();
+  }, [toast, isAdmin]);
 
   useEffect(() => {
     if (mode === 'template') {
@@ -211,6 +251,33 @@ export default function CreateCampaignModal({ open, onClose, onCreated }: Props)
     setMediaUploadProgress(null);
     setUploadingMedia(false);
   };
+
+  const handleContactsChange = useCallback(
+    async (file: File | null) => {
+      setSelectedContactFile(null);
+      setContactsFile(file);
+
+      if (!file) {
+        setContactsCount(0);
+        return;
+      }
+
+      setContactsCount(0);
+
+      try {
+        const estimated = await estimateContactsFromCsv(file);
+        setContactsCount(estimated);
+      } catch (error) {
+        console.error("Failed to estimate contacts count:", error);
+        toast({
+          title: "Could not read contacts file",
+          description: error instanceof Error ? error.message : "Please verify the file and try again.",
+          variant: "destructive",
+        });
+      }
+    },
+    [toast],
+  );
 
   const handleMediaChange = async (file: File | null) => {
     if (!file) {

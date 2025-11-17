@@ -6,8 +6,11 @@ import {
   JoinColumn,
   CreateDateColumn,
   UpdateDateColumn,
+  PrimaryColumn,
+  Index,
 } from 'typeorm';
 import { User } from '../../auth/entities/user.entity';
+import { Contact } from '../../contacts/entities/contact.entity';
 
 export interface CampaignCtaButton {
   type: 'URL' | 'PHONE' | 'QUICK_REPLY';
@@ -85,4 +88,32 @@ export class Campaign {
 
   @UpdateDateColumn({ name: 'updated_at' })
   updatedAt: Date;
+}
+
+@Entity('campaign_contacts')
+@Index(['campaignId', 'contactId'], { unique: true })
+@Index(['campaignId', 'jobId'])
+export class CampaignContact {
+  @PrimaryColumn({ name: 'campaign_id', type: 'int' })
+  campaignId: number;
+
+  @PrimaryColumn({ name: 'contact_id', type: 'int' })
+  contactId: number;
+
+  @ManyToOne(() => Campaign, { onDelete: 'CASCADE' })
+  @JoinColumn({ name: 'campaign_id' })
+  campaign: Campaign;
+
+  @ManyToOne(() => Contact, { onDelete: 'CASCADE' })
+  @JoinColumn({ name: 'contact_id' })
+  contact: Contact;
+
+  @Column({ name: 'sequence', type: 'int' })
+  sequence: number;
+
+  @Column({ name: 'job_id', type: 'varchar', length: 128, nullable: true, default: null })
+  jobId: string | null;
+
+  @CreateDateColumn({ name: 'created_at' })
+  createdAt: Date;
 }

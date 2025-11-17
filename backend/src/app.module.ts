@@ -10,6 +10,8 @@ import { CommonModule } from './common/common.module';
 import { ReportsModule } from './reports/reports.module';
 import { MediaModule } from './media/media.module';
 import { ScheduleModule } from '@nestjs/schedule';
+import { BullModule } from '@nestjs/bullmq';
+import { CleanupModule } from './queues/cleanup.module';
 
 @Module({
   imports: [
@@ -26,7 +28,20 @@ import { ScheduleModule } from '@nestjs/schedule';
         password: configService.get('DATABASE_PASSWORD'),
         database: configService.get('DATABASE_NAME'),
         entities: [__dirname + '/**/*.entity{.ts,.js}'],
-        synchronize: false, // Set to false in production
+        synchronize: false, 
+      }),
+      inject: [ConfigService],
+    }),
+    BullModule.forRootAsync({
+      imports: [ConfigModule],
+      useFactory: (configService: ConfigService) => ({
+        connection: {
+          host: configService.get('REDIS_HOST', '127.0.0.1'),
+          port: Number(configService.get('REDIS_PORT', 6379)),
+          username: configService.get('REDIS_USERNAME'),
+          password: configService.get('REDIS_PASSWORD'),
+          db: Number(configService.get('REDIS_DB', 0)),
+        },
       }),
       inject: [ConfigService],
     }),
@@ -39,6 +54,7 @@ import { ScheduleModule } from '@nestjs/schedule';
     CommonModule,
     ReportsModule,
     MediaModule,
+    CleanupModule,
   ],
 })
 export class AppModule {}

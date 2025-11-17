@@ -7,10 +7,15 @@ import { SentMessage } from './entities/sent-message.entity';
 import { DispatchWorker } from './dispatch.worker';
 import { MockWhatsAppAdapter, WHATSAPP_ADAPTER } from './adapters/whatsapp.adapter';
 import { Contact } from '../contacts/entities/contact.entity';
-import { Campaign } from '../campaigns/entities/campaign.entity';
+import { Campaign, CampaignContact } from '../campaigns/entities/campaign.entity';
+import { CleanupModule } from '../queues/cleanup.module';
 
 @Module({
-  imports: [NumbersModule, TypeOrmModule.forFeature([CampaignJob, SentMessage, Contact, Campaign])],
+  imports: [
+    NumbersModule,
+    CleanupModule,
+    TypeOrmModule.forFeature([CampaignJob, SentMessage, Contact, Campaign, CampaignContact]),
+  ],
   providers: [
     DispatchService,
     DispatchWorker,

@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import {
   LayoutDashboard,
   Send,
@@ -11,15 +11,23 @@ import {
   Menu,
 } from "lucide-react";
 import { NavLink } from "react-router-dom";
+import { useAuthStore } from "@/store/authStore";
 
-const navItems = [
+interface NavItem {
+  title: string;
+  url: string;
+  icon: typeof LayoutDashboard;
+  requiresAdmin?: boolean;
+}
+
+const navItems: NavItem[] = [
   { title: "Dashboard", url: "/", icon: LayoutDashboard },
   { title: "Campaigns", url: "/campaigns", icon: Send },
   { title: "Active Campaigns", url: "/active-campaigns", icon: PlayCircle },
   { title: "Contacts", url: "/contacts", icon: Users },
   { title: "Automations", url: "/automations", icon: Bot },
   { title: "Reports", url: "/reports", icon: BarChart3 },
-  { title: "Settings", url: "/settings", icon: SettingsIcon },
+  { title: "Settings", url: "/settings", icon: SettingsIcon, requiresAdmin: true },
 ];
 
 export function AppSidebar() {
@@ -28,6 +36,13 @@ export function AppSidebar() {
   const [collapsed, setCollapsed] = useState(false); 
   const [isMobile, setIsMobile] = useState(false);
   const [mobileOpen, setMobileOpen] = useState(false);
+  const checkIsAdmin = useAuthStore((state) => state.isAdmin);
+  const isAdmin = checkIsAdmin();
+
+  const visibleNavItems = useMemo(
+    () => navItems.filter((item) => !item.requiresAdmin || isAdmin),
+    [isAdmin],
+  );
 
   useEffect(() => {
     const handleResize = () => {
@@ -46,7 +61,7 @@ export function AppSidebar() {
   const sidebarWidth = "w-64"; 
 
   // Render a single nav item
-  const renderNavItem = (item: typeof navItems[0]) => (
+  const renderNavItem = (item: NavItem) => (
     <li key={item.title}>
       <NavLink
         to={item.url}
@@ -117,14 +132,14 @@ export function AppSidebar() {
         {/* 2. Navigation Menu - Placed directly below the logo. Uses flex-1 to push the footer down. */}
         <nav className="flex-1 overflow-y-auto pt-4 pb-2"> 
           <ul className="px-2 space-y-1"> 
-            {navItems.map(renderNavItem)}
+            {visibleNavItems.map(renderNavItem)}
           </ul>
         </nav>
 
         {/* 3. Footer - Only the copyright text at the bottom. Removed border-t. */}
         <div className="p-4">
             <p className="text-xs text-slate-300 dark:text-slate-500">
-              © {new Date().getFullYear()} Campaigner
+              {new Date().getFullYear()} Campaigner
             </p>
             {/* Collapse button removed here */}
         </div>

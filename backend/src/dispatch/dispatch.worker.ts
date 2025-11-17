@@ -1,13 +1,15 @@
 import { Inject, Injectable, Logger } from '@nestjs/common';
 import { Cron, CronExpression } from '@nestjs/schedule';
 import { InjectRepository } from '@nestjs/typeorm';
-import { DataSource, Repository } from 'typeorm';
+import { DataSource, In, Repository } from 'typeorm';
 import { CampaignJob } from './entities/campaign-job.entity';
 import { SentMessage } from './entities/sent-message.entity';
 import { Contact } from '../contacts/entities/contact.entity';
-import { Campaign } from '../campaigns/entities/campaign.entity';
+import { Campaign, CampaignContact } from '../campaigns/entities/campaign.entity';
 import { DispatchJobStatus } from './types/dispatch-job';
 import { WHATSAPP_ADAPTER, WhatsAppAdapter } from './adapters/whatsapp.adapter';
+import { CleanupService } from '../queues/cleanup.service';
+import { ConfigService } from '@nestjs/config';
 
 interface ClaimedJobResult {
   job: CampaignJob;
@@ -28,9 +30,16 @@ export class DispatchWorker {
     private readonly contactRepo: Repository<Contact>,
     @InjectRepository(Campaign)
     private readonly campaignRepo: Repository<Campaign>,
+    @InjectRepository(CampaignContact)
+    private readonly campaignContactRepo: Repository<CampaignContact>,
     @Inject(WHATSAPP_ADAPTER)
     private readonly whatsappAdapter: WhatsAppAdapter,
+    private readonly cleanupService: CleanupService,
+    private readonly configService: ConfigService,
   ) {}
+
+  private readonly logRetentionMs = this.resolveRetentionMs('LOG_RETENTION_DAYS', 30);
+  private readonly retryRetentionMs = this.resolveRetentionMs('RETRY_RETENTION_DAYS', 7);
 
   @Cron(CronExpression.EVERY_5_SECONDS)
   async handleTick(): Promise<void> {
@@ -84,23 +93,25 @@ export class DispatchWorker {
 
   private async processJob(job: CampaignJob): Promise<void> {
     try {
-      const recipients = await this.contactRepo.find({
+      const campaignContacts = await this.campaignContactRepo.find({
         where: {
-          user: { id: job.userId },
-          is_active: true,
+          campaignId: job.campaignId,
+          jobId: job.jobId,
         },
-        order: {
-          created_at: 'ASC',
-        },
-        take: job.size,
+        relations: ['contact'],
+        order: { sequence: 'ASC' },
       });
 
+      const recipients = campaignContacts
+        .map((cc) => cc.contact)
+        .filter((contact): contact is Contact => !!contact && contact.is_active);
+
       if (!recipients.length) {
-        await this.markJob(job, 'failed', 'No active contacts available for this campaign');
+        await this.markJob(job, 'failed', 'No assigned contacts available for this campaign job');
         return;
       }
 
-      const processed = await this.dispatchRecipients(job, recipients.map((contact) => contact.phone));
+      const processed = await this.dispatchRecipients(job, recipients);
       await this.finaliseJob(job, processed);
     } catch (error) {
       this.logger.error(`Failed processing job ${job.jobId}`, error instanceof Error ? error.stack : error);
@@ -110,15 +121,17 @@ export class DispatchWorker {
 
   private async dispatchRecipients(
     job: CampaignJob,
-    phones: string[],
+    contacts: Contact[],
   ): Promise<{ total: number; successful: number; failed: number }> {
     let successful = 0;
     let failed = 0;
 
-    for (const phone of phones) {
+    for (const contact of contacts) {
+      const phone = contact.phone;
       const queuedMessage = this.sentMessageRepo.create({
         campaignId: job.campaignId,
         campaignJobId: job.id,
+        contactId: contact.id,
         toPhone: phone,
         status: 'pending',
         virtualNumberId: job.virtualNumberId ?? undefined,
@@ -167,8 +180,8 @@ export class DispatchWorker {
       await this.sentMessageRepo.save(message);
     }
 
-    if (phones.length) {
-      await this.campaignRepo.increment({ id: job.campaignId }, 'sentCount', phones.length);
+    if (contacts.length) {
+      await this.campaignRepo.increment({ id: job.campaignId }, 'sentCount', contacts.length);
     }
     if (successful) {
       await this.campaignRepo.increment({ id: job.campaignId }, 'successCount', successful);
@@ -177,7 +190,7 @@ export class DispatchWorker {
       await this.campaignRepo.increment({ id: job.campaignId }, 'failedCount', failed);
     }
 
-    return { total: phones.length, successful, failed };
+    return { total: contacts.length, successful, failed };
   }
 
   private async finaliseJob(
@@ -192,6 +205,10 @@ export class DispatchWorker {
     this.logger.log(
       `Processed campaign job ${job.jobId}: total=${result.total} success=${result.successful} failed=${result.failed}`,
     );
+
+    if (job.batchIndex === job.totalBatches - 1 && job.status === 'completed') {
+      await this.cleanupService.scheduleMediaCleanup({ campaignId: job.campaignId });
+    }
   }
 
   private async markJob(job: CampaignJob, status: DispatchJobStatus, reason?: string): Promise<void> {
@@ -199,5 +216,11 @@ export class DispatchWorker {
     job.finishedAt = new Date();
     job.error = reason ?? null;
     await this.campaignJobRepo.save(job);
+  }
+
+  private resolveRetentionMs(key: string, defaultDays: number): number {
+    const raw = this.configService.get<string | number>(key);
+    const days = raw !== undefined && raw !== null ? Number(raw) : defaultDays;
+    return Number.isFinite(days) && days > 0 ? days * 24 * 60 * 60 * 1000 : defaultDays * 24 * 60 * 60 * 1000;
   }
 }

@@ -7,6 +7,7 @@ import { SidebarProvider } from "@/components/ui/sidebar";
 import { AppSidebar } from "./components/AppSidebar";
 import { Header } from "./components/Header";
 import { ProtectedRoute } from "./components/ProtectedRoute";
+import { AdminRoute } from "./components/AdminRoute";
 import Dashboard from "./pages/Dashboard";
 import Campaigns from "./pages/Campaigns";
 import Contacts from "./pages/Contacts";
@@ -65,7 +66,14 @@ const App = () => {
               <Route path="/contacts" element={<Contacts />} />
               <Route path="/automations" element={<Automations />} />
               <Route path="/reports" element={<Reports />} />
-              <Route path="/settings" element={<Settings />} />
+              <Route
+                path="/settings"
+                element={
+                  <AdminRoute>
+                    <Settings />
+                  </AdminRoute>
+                }
+              />
               <Route path="/profile" element={<Profile />} />
               {/* 404 catch-all route */}
               <Route path="*" element={<NotFound />} />

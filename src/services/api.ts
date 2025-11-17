@@ -398,11 +398,117 @@ export interface CampaignReportSummary {
   delivered: number;
   failed: number;
   read: number;
-  readCount: number;
-  deliveryRate: number;
-  failureRate: number;
-  lastUpdated: string;
 }
+
+export type TemplateApprovalStatus = 'pending' | 'approved' | 'rejected';
+
+export type ProviderValidationStatus =
+  | 'not_required'
+  | 'pending'
+  | 'in_progress'
+  | 'approved'
+  | 'rejected'
+  | 'failed';
+
+export interface TemplateVariable {
+  key: string;
+  sampleValue?: string | null;
+}
+
+export interface TemplateSampleParameter {
+  name: string;
+  value?: string | null;
+}
+
+export interface MessageTemplate {
+  id: number;
+  name: string;
+  category?: string | null;
+  language: string;
+  body: string;
+  header?: string | null;
+  footer?: string | null;
+  approvalStatus: TemplateApprovalStatus;
+  rejectionReason?: string | null;
+  metaStatus: ProviderValidationStatus;
+  dltStatus: ProviderValidationStatus;
+  bspStatus: ProviderValidationStatus;
+  metaTemplateId?: string | null;
+  dltTemplateId?: string | null;
+  bspTemplateId?: string | null;
+  attachmentUrl?: string | null;
+  variables?: TemplateVariable[] | null;
+  sampleParameters: TemplateSampleParameter[];
+  createdAt?: string;
+  updatedAt?: string;
+}
+
+export interface TemplateSyncSummary {
+  provider: 'meta' | 'dlt' | 'bsp';
+  fetched: number;
+  created: number;
+  updated: number;
+  skipped: number;
+  errors: string[];
+}
+
+export interface TemplatePayloadValidationInput {
+  variables?:
+    | Record<string, string | number | boolean | null | undefined>
+    | TemplateVariable[];
+  media?: {
+    mediaUrl?: string | null;
+    attachmentUrl?: string | null;
+    mediaType?: string | null;
+    mimeType?: string | null;
+    mediaName?: string | null;
+    mediaSize?: number | null;
+  };
+}
+
+export interface TemplateMediaRequirement {
+  required: boolean;
+  expectedType?: string | null;
+  format?: string | null;
+}
+
+export interface TemplatePayloadValidationResult {
+  isValid: boolean;
+  errors: string[];
+  warnings: string[];
+  requiredVariables: string[];
+  providedVariables: string[];
+  templateApprovalStatus: TemplateApprovalStatus;
+  mediaRequirement: TemplateMediaRequirement;
+}
+
+export const templatesAPI = {
+  listAll: async (): Promise<MessageTemplate[]> => {
+    const response = await api.get<MessageTemplate[]>('/templates');
+    return response.data;
+  },
+
+  listApproved: async (): Promise<MessageTemplate[]> => {
+    const response = await api.get<MessageTemplate[]>('/templates/approved');
+    return response.data;
+  },
+
+  sync: async (): Promise<TemplateSyncSummary[]> => {
+    const response = await api.post<TemplateSyncSummary[]>('/templates/sync');
+    return response.data;
+  },
+
+  validate: async (
+    id: number,
+    payload: TemplatePayloadValidationInput,
+  ): Promise<TemplatePayloadValidationResult> => {
+    const response = await api.post<TemplatePayloadValidationResult>(
+      `/templates/${id}/validate`,
+      payload,
+    );
+    return response.data;
+  },
+};
 
 export interface CampaignReportsOverview {
   totals: {

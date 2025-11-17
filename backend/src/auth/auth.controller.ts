@@ -17,7 +17,7 @@ export class AuthController {
 
   @Post('register')
   async register(@Body() registerDto: RegisterDto) {
-    // Public registration is limited to regular users
+    
     const userDto = { ...registerDto, role: 'user' };
     return this.authService.register(userDto);
   }

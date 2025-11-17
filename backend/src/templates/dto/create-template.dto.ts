@@ -11,7 +11,7 @@ import {
 import { Type } from 'class-transformer';
 import { TemplateValidationMode } from '../../campaigns/entities/message-template.entity';
 
-class TemplateVariableDto {
+export class TemplateVariableDto {
   @IsString()
   @IsNotEmpty()
   key: string;
@@ -21,7 +21,7 @@ class TemplateVariableDto {
   sampleValue?: string;
 }
 
-class TemplateSampleParameterDto {
+export class TemplateSampleParameterDto {
   @IsString()
   @IsNotEmpty()
   name: string;

@@ -19,6 +19,11 @@ export class RunCampaignDto {
   @IsOptional()
   @IsBoolean()
   startImmediately?: boolean;
+
+  @IsOptional()
+  @IsArray()
+  @Type(() => Number)
+  contactIds?: number[];
 }
 
 export class DispatchJobSummaryDto {
