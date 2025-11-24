@@ -233,6 +233,14 @@ export class ContactsService {
       }
 
       const phonesFound = Array.from(uniquePhones);
+      const { reassigned, updated } = await this.assignContactsToUser(phonesFound, user, filename);
+      if (reassigned > 0) {
+        console.log(`Reassigned ${reassigned} existing contacts to user ${user.id}`);
+      }
+      if (updated > 0) {
+        console.log(`Updated ${updated} existing contacts for user ${user.id} with file ${filename}`);
+      }
+
       const newPhones = await this.excludeExistingPhones(phonesFound);
 
       if (newPhones.length > 0) {
@@ -241,7 +249,7 @@ export class ContactsService {
           this.contactRepo.create({
             phone,
             source_file: filename,
-            user: { id: user.id },
+            user: { id: user.id } as User,
           }),
         );
 
@@ -249,8 +257,8 @@ export class ContactsService {
           const batchSize = 100;
           for (let i = 0; i < entities.length; i += batchSize) {
             const batch = entities.slice(i, i + batchSize);
-            console.log(`Inserting batch ${i / batchSize + 1} of ${Math.ceil(entities.length / batchSize)}`);
-            await this.contactRepo.insert(batch);
+            console.log(`Saving batch ${i / batchSize + 1} of ${Math.ceil(entities.length / batchSize)}`);
+            await this.contactRepo.save(batch);
           }
           console.log('All contacts saved successfully');
         } catch (error) {
@@ -288,6 +296,14 @@ export class ContactsService {
           .on('end', async () => {
             try {
               const phonesFound = Array.from(uniquePhones);
+              const { reassigned, updated } = await this.assignContactsToUser(phonesFound, user, filename);
+              if (reassigned > 0) {
+                console.log(`Reassigned ${reassigned} existing contacts to user ${user.id}`);
+              }
+              if (updated > 0) {
+                console.log(`Updated ${updated} existing contacts for user ${user.id} with file ${filename}`);
+              }
+
               const newPhones = await this.excludeExistingPhones(phonesFound);
 
               if (newPhones.length > 0) {
@@ -296,15 +312,15 @@ export class ContactsService {
                   this.contactRepo.create({
                     phone,
                     source_file: filename,
-                    user: { id: user.id },
+                    user: { id: user.id } as User,
                   }),
                 );
 
                 const batchSize = 100;
                 for (let i = 0; i < entities.length; i += batchSize) {
                   const batch = entities.slice(i, i + batchSize);
-                  console.log(`Inserting batch ${i / batchSize + 1} of ${Math.ceil(entities.length / batchSize)}`);
-                  await this.contactRepo.insert(batch);
+                  console.log(`Saving batch ${i / batchSize + 1} of ${Math.ceil(entities.length / batchSize)}`);
+                  await this.contactRepo.save(batch);
                 }
                 console.log('All contacts saved successfully');
               } else {
@@ -402,6 +418,64 @@ export class ContactsService {
     }
 
     return cleaned;
+  }
+
+  private async assignContactsToUser(
+    phones: string[],
+    user: User,
+    filename: string,
+  ): Promise<{ reassigned: number; updated: number }> {
+    if (!phones.length) {
+      return { reassigned: 0, updated: 0 };
+    }
+
+    const chunkSize = 500;
+    let reassigned = 0;
+    let updated = 0;
+
+    for (let i = 0; i < phones.length; i += chunkSize) {
+      const chunk = phones.slice(i, i + chunkSize);
+      const ownedContacts = await this.contactRepo
+        .createQueryBuilder('contact')
+        .where('contact.phone IN (:...phones)', { phones: chunk })
+        .andWhere('contact.user_id = :userId', { userId: user.id })
+        .getMany();
+
+      const contactsNeedingUpdate = ownedContacts.filter(
+        (contact) => contact.source_file !== filename,
+      );
+
+      if (contactsNeedingUpdate.length) {
+        contactsNeedingUpdate.forEach((contact) => {
+          contact.source_file = filename;
+        });
+
+        await this.contactRepo.save(contactsNeedingUpdate);
+        updated += contactsNeedingUpdate.length;
+      }
+
+      const unownedContacts = await this.contactRepo
+        .createQueryBuilder('contact')
+        .where('contact.phone IN (:...phones)', { phones: chunk })
+        .andWhere('contact.user_id IS NULL')
+        .getMany();
+
+      if (!unownedContacts.length) {
+        continue;
+      }
+
+      unownedContacts.forEach((contact) => {
+        contact.user = { id: user.id } as User;
+        if (!contact.source_file) {
+          contact.source_file = filename;
+        }
+      });
+
+      await this.contactRepo.save(unownedContacts);
+      reassigned += unownedContacts.length;
+    }
+
+    return { reassigned, updated };
   }
 
   private async excludeExistingPhones(phones: string[]): Promise<string[]> {
