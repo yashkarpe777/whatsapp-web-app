@@ -78,6 +78,7 @@ type BusinessFormState = {
   displayPhoneNumber: string;
   accessToken: string;
   autoSwitchEnabled: boolean;
+  maxMessagesPerNumber?: number | null;
 };
 
 const DEFAULT_BUSINESS_FORM: BusinessFormState = {
@@ -87,6 +88,7 @@ const DEFAULT_BUSINESS_FORM: BusinessFormState = {
   displayPhoneNumber: "",
   accessToken: "",
   autoSwitchEnabled: true,
+  maxMessagesPerNumber: null,
 };
 
 const DEFAULT_NEW_NUMBER: CreateVirtualNumberPayload = {
@@ -109,7 +111,7 @@ const Settings = () => {
   const [numbersLoading, setNumbersLoading] = useState(true);
   const [numbersRefreshing, setNumbersRefreshing] = useState(false);
   const [switching, setSwitching] = useState(false);
-  const [updatingPrimaryId, setUpdatingPrimaryId] = useState<number | null>(null);
+  const [updatingEligibilityId, setUpdatingEligibilityId] = useState<number | null>(null);
 
   const [showAddDialog, setShowAddDialog] = useState(false);
   const [newNumberForm, setNewNumberForm] = useState<CreateVirtualNumberPayload>(DEFAULT_NEW_NUMBER);
@@ -125,7 +127,17 @@ const Settings = () => {
 
   const [activeTab, setActiveTab] = useState<"business" | "virtual" | "templates">("business");
 
-  const primaryNumber = useMemo(() => virtualNumbers.find((item) => item.isPrimary), [virtualNumbers]);
+  const rotationSummary = useMemo(() => {
+    const eligible = virtualNumbers.filter((item) => item.isPrimary);
+    const latestUsage = eligible
+      .map((item) => (item.lastUsedAt ? new Date(item.lastUsedAt).getTime() : 0))
+      .sort((a, b) => b - a)[0];
+
+    return {
+      eligibleCount: eligible.length,
+      lastUsageLabel: latestUsage ? new Date(latestUsage).toLocaleString() : null,
+    };
+  }, [virtualNumbers]);
 
   useEffect(() => {
     void loadBusiness();
@@ -255,7 +267,10 @@ const Settings = () => {
     setSwitching(true);
     try {
       const switched = await numbersAPI.manualSwitch();
-      toast({ title: "Primary switched", description: `Now using ${switched.phoneNumberId}` });
+      toast({
+        title: "Rotation triggered",
+        description: `Now routing via ${switched.phoneNumberId}`,
+      });
       await loadNumbers();
     } catch (error: any) {
       toast({
@@ -268,20 +283,22 @@ const Settings = () => {
     }
   };
 
-  const handleSetPrimary = async (id: number) => {
-    setUpdatingPrimaryId(id);
+  const handleToggleEligibility = async (id: number, eligible: boolean) => {
+    setUpdatingEligibilityId(id);
     try {
-      await numbersAPI.updateVirtualNumber(id, { isPrimary: true });
-      toast({ title: "Primary updated" });
+      await numbersAPI.updateVirtualNumber(id, { isPrimary: eligible });
+      toast({
+        title: eligible ? "Number added to rotation" : "Number removed from rotation",
+      });
       await loadNumbers();
     } catch (error: any) {
       toast({
         title: "Update failed",
-        description: error.message || "Unable to set primary number",
+        description: error.message || "Unable to update rotation eligibility",
         variant: "destructive",
       });
     } finally {
-      setUpdatingPrimaryId(null);
+      setUpdatingEligibilityId(null);
     }
   };
 
@@ -385,10 +402,6 @@ const Settings = () => {
       setValidatingTemplateId(null);
     }
   };
-
-  const lastUsedLabel = primaryNumber?.lastUsedAt
-    ? new Date(primaryNumber.lastUsedAt).toLocaleString()
-    : "No recent usage";
 
   return (
     <div className="min-h-screen bg-background p-6">
@@ -511,11 +524,11 @@ const Settings = () => {
                       </div>
                     </div>
 
-                    <div className="flex items-center justify-between rounded-md border p-4">
+                    <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between rounded-md border p-4">
                       <div>
-                        <p className="font-medium">Auto-switch virtual numbers</p>
+                        <p className="font-medium">Random rotation across virtual numbers</p>
                         <p className="text-sm text-muted-foreground">
-                          Automatically promote a healthy number if the primary is degraded.
+                          When enabled, healthy numbers are rotated automatically to balance throughput and avoid quality downgrades.
                         </p>
                       </div>
                       <Switch
@@ -545,7 +558,7 @@ const Settings = () => {
                   <div>
                     <CardTitle>Virtual Numbers</CardTitle>
                     <CardDescription>
-                      Manage active numbers, monitor health, and trigger manual failover.
+                      Manage the rotation pool, monitor health, and trigger manual failover.
                     </CardDescription>
                   </div>
                   <div className="flex gap-2">
@@ -555,7 +568,7 @@ const Settings = () => {
                       ) : (
                         <RefreshCcw className="mr-2 h-4 w-4" />
                       )}
-                      Manual Switch
+                      Trigger Rotation
                     </Button>
                     <Dialog
                       open={showAddDialog}
@@ -638,9 +651,9 @@ const Settings = () => {
                           </div>
                           <div className="flex items-center justify-between rounded-md border p-3">
                             <div>
-                              <p className="text-sm font-medium">Set as primary</p>
+                              <p className="text-sm font-medium">Add to rotation pool</p>
                               <p className="text-xs text-muted-foreground">
-                                Current primary will be replaced immediately.
+                                Eligible numbers are considered when rotating senders automatically.
                               </p>
                             </div>
                             <Switch
@@ -664,11 +677,11 @@ const Settings = () => {
                     </Dialog>
                   </div>
                 </div>
-                {primaryNumber && (
-                  <p className="text-sm text-muted-foreground">
-                    Current primary: <span className="font-medium">{primaryNumber.phoneNumberId}</span> (last used {lastUsedLabel})
-                  </p>
-                )}
+                <p className="text-sm text-muted-foreground">
+                  Rotation pool: <span className="font-medium">{rotationSummary.eligibleCount}</span> eligible number{rotationSummary.eligibleCount === 1 ? "" : "s"}
+                  {" "}
+                  {rotationSummary.lastUsageLabel ? `• last used ${rotationSummary.lastUsageLabel}` : ""}
+                </p>
               </CardHeader>
               <CardContent>
                 <div className="rounded-md border">
@@ -678,9 +691,9 @@ const Settings = () => {
                         <th className="h-10 px-4 text-left font-medium">Number</th>
                         <th className="h-10 px-4 text-left font-medium">Status</th>
                         <th className="h-10 px-4 text-left font-medium">Quality</th>
+                        <th className="h-10 px-4 text-left font-medium">Rotation Eligible</th>
                         <th className="h-10 px-4 text-left font-medium">24h Messages</th>
                         <th className="h-10 px-4 text-left font-medium">Last Used</th>
-                        <th className="h-10 px-4 text-left font-medium">Actions</th>
                       </tr>
                     </thead>
                     <tbody>
@@ -703,9 +716,6 @@ const Settings = () => {
                               <div className="flex flex-col">
                                 <span className="font-medium">{number.phoneNumberId}</span>
                                 <span className="text-xs text-muted-foreground">WABA: {number.wabaId}</span>
-                                {number.isPrimary && (
-                                  <Badge variant="outline" className="mt-1">Primary</Badge>
-                                )}
                               </div>
                             </td>
                             <td className="p-4">
@@ -718,25 +728,21 @@ const Settings = () => {
                                 {number.qualityRating}
                               </Badge>
                             </td>
+                            <td className="p-4">
+                              <div className="flex items-center gap-2">
+                                <Switch
+                                  checked={number.isPrimary}
+                                  onCheckedChange={(checked) => handleToggleEligibility(number.id, checked)}
+                                  disabled={updatingEligibilityId === number.id}
+                                />
+                                {updatingEligibilityId === number.id && (
+                                  <Loader2 className="h-3 w-3 animate-spin text-muted-foreground" />
+                                )}
+                              </div>
+                            </td>
                             <td className="p-4">{number.messageCount24h}</td>
                             <td className="p-4">
-                              {number.lastUsedAt ? new Date(number.lastUsedAt).toLocaleString() : "—"}
-                            </td>
-                            <td className="p-4">
-                              <Button
-                                size="sm"
-                                variant="outline"
-                                onClick={() => handleSetPrimary(number.id)}
-                                disabled={number.isPrimary || updatingPrimaryId === number.id}
-                              >
-                                {updatingPrimaryId === number.id ? (
-                                  <Loader2 className="h-4 w-4 animate-spin" />
-                                ) : number.isPrimary ? (
-                                  "Primary"
-                                ) : (
-                                  "Set Primary"
-                                )}
-                              </Button>
+                              {number.lastUsedAt ? new Date(number.lastUsedAt).toLocaleString() : "—" }
                             </td>
                           </tr>
                         ))

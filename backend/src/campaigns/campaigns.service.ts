@@ -155,17 +155,16 @@ export class CampaignsService {
       if (!campaign) throw new NotFoundException(`Campaign with ID ${id} not found`);
       return campaign;
     } catch (error) {
-      // If it's already a NotFoundException, rethrow it
       if (error instanceof NotFoundException) throw error;
       
-      // Otherwise, log and throw a more specific error
+      
       console.error(`Error finding campaign with ID ${id}:`, error);
       throw new NotFoundException(`Error retrieving campaign: ${error.message}`);
     }
   }
 
   async update(id: number | string, dto: UpdateCampaignDto) {
-    // Validate the ID is a valid number
+    
     const campaignId = Number(id);
     
     if (isNaN(campaignId)) {
@@ -380,10 +379,8 @@ export class CampaignsService {
   }
 
   private async resolveVirtualNumber(preferredId?: number): Promise<VirtualNumber> {
-    const numbers = await this.numbersService.listVirtualNumbers();
-
     if (preferredId) {
-      const specific = numbers.find((num) => num.id === preferredId);
+      const specific = await this.numbersService.listVirtualNumbers().then((nums) => nums.find((num) => num.id === preferredId));
       if (!specific) {
         throw new NotFoundException(`Virtual number ${preferredId} not found`);
       }
@@ -393,16 +390,7 @@ export class CampaignsService {
       return specific;
     }
 
-    const primaryActive = numbers.find(
-      (num) => num.isPrimary && num.status === VirtualNumberStatus.ACTIVE,
-    );
-    if (primaryActive) {
-      return primaryActive;
-    }
-
-    const switched = await this.numbersService.manualSwitch(undefined, {
-      reason: 'Auto-switch triggered for campaign run',
-    });
+    const switched = await this.numbersService.selectRandomActiveNumber();
 
     if (!switched || switched.status !== VirtualNumberStatus.ACTIVE) {
       throw new BadRequestException('No active virtual number available to run campaign');

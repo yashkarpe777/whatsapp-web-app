@@ -1,4 +1,4 @@
-import { Injectable, NotFoundException, BadRequestException } from '@nestjs/common';
+import { Injectable, NotFoundException, BadRequestException, Logger } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository, Not, IsNull } from 'typeorm';
 import { VirtualNumber } from './entities/virtual-number.entity';
@@ -11,10 +11,30 @@ import { VirtualNumberQuality, VirtualNumberStatus } from './enums';
 type SwitchContext = {
   reason: string;
   forced?: boolean;
+  excludeIds?: number[];
+  maxMessageCount24h?: number;
+  cooldownMinutes?: number;
+  qualityWeights?: Partial<Record<VirtualNumberQuality, number>>;
+};
+
+type PickRandomActiveNumberOptions = {
+  excludeIds?: number[];
+  maxMessageCount24h?: number;
+  cooldownMinutes?: number;
+  qualityWeights?: Partial<Record<VirtualNumberQuality, number>>;
+};
+
+const DEFAULT_QUALITY_WEIGHTS: Record<VirtualNumberQuality, number> = {
+  [VirtualNumberQuality.HIGH]: 5,
+  [VirtualNumberQuality.MEDIUM]: 3,
+  [VirtualNumberQuality.LOW]: 1,
+  [VirtualNumberQuality.UNKNOWN]: 1,
 };
 
 @Injectable()
 export class NumbersService {
+  private readonly logger = new Logger(NumbersService.name);
+
   constructor(
     @InjectRepository(VirtualNumber)
     private readonly virtualRepo: Repository<VirtualNumber>,
@@ -33,14 +53,18 @@ export class NumbersService {
   }
 
   async listVirtualNumbers(): Promise<VirtualNumber[]> {
-    return this.virtualRepo.find({ order: { isPrimary: 'DESC', qualityRating: 'ASC', id: 'ASC' } });
+    return this.virtualRepo.find({
+      order: {
+        isPrimary: 'DESC',
+        status: 'ASC',
+        qualityRating: 'ASC',
+        messageCount24h: 'ASC',
+        id: 'ASC',
+      },
+    });
   }
 
   async createVirtualNumber(dto: CreateVirtualNumberDto): Promise<VirtualNumber> {
-    if (dto.isPrimary) {
-      await this.clearPrimaryFlag();
-    }
-
     const entity = this.virtualRepo.create({
       businessNumber: dto.businessNumberId ? await this.getBusinessNumberById(dto.businessNumberId) : undefined,
       wabaId: dto.wabaId,
@@ -48,7 +72,7 @@ export class NumbersService {
       accessToken: dto.accessToken,
       status: dto.status || VirtualNumberStatus.ACTIVE,
       qualityRating: dto.qualityRating || VirtualNumberQuality.UNKNOWN,
-      isPrimary: dto.isPrimary || false,
+      isPrimary: dto.isPrimary ?? true,
     });
 
     return this.virtualRepo.save(entity);
@@ -58,14 +82,12 @@ export class NumbersService {
     const entity = await this.virtualRepo.findOne({ where: { id } });
     if (!entity) throw new NotFoundException('Virtual number not found');
 
-    if (dto.isPrimary) {
-      await this.clearPrimaryFlag();
-    } else if (dto.isPrimary === false && entity.isPrimary) {
-      throw new BadRequestException('At least one number must remain primary');
-    }
-
     if (dto.businessNumberId !== undefined) {
       entity.businessNumber = await this.getBusinessNumberById(dto.businessNumberId);
+    }
+
+    if (dto.isPrimary !== undefined) {
+      entity.isPrimary = dto.isPrimary;
     }
 
     Object.assign(entity, dto);
@@ -80,22 +102,35 @@ export class NumbersService {
       if (!target) {
         throw new NotFoundException(`Target virtual number ${targetId} not found`);
       }
+      if (target.status !== VirtualNumberStatus.ACTIVE) {
+        throw new BadRequestException('Selected virtual number is not active');
+      }
+
+      if (!target.isPrimary) {
+        if (context.forced) {
+          target.isPrimary = true;
+          await this.virtualRepo.save(target);
+        } else {
+          throw new BadRequestException('Selected virtual number is not rotation-enabled');
+        }
+      }
+
+      await this.touchUsage(target.id);
+      return target;
     }
 
-    if (!target) {
-      target = await this.pickBestCandidate();
-    }
+    const selected = await this.selectRandomActiveNumber({
+      excludeIds: context.excludeIds,
+      maxMessageCount24h: context.maxMessageCount24h,
+      cooldownMinutes: context.cooldownMinutes,
+      qualityWeights: context.qualityWeights,
+    });
 
-    if (!target) {
+    if (!selected) {
       throw new BadRequestException('No eligible virtual numbers found for switching');
     }
 
-    await this.clearPrimaryFlag();
-    target.isPrimary = true;
-    target.lastUsedAt = new Date();
-    await this.virtualRepo.save(target);
-
-    return target;
+    return selected;
   }
 
   async recordMessageUsage(numberId: number, countIncrement = 1): Promise<void> {
@@ -115,16 +150,14 @@ export class NumbersService {
     if (status) entity.status = status;
     if (quality) entity.qualityRating = quality;
 
-    await this.virtualRepo.save(entity);
-
     const qualityDegraded = quality && this.isQualityDowngrade(previousQuality, quality);
     const statusCritical = status && [VirtualNumberStatus.BANNED, VirtualNumberStatus.RESTRICTED, VirtualNumberStatus.THROTTLED].includes(status);
 
-    if ((qualityDegraded || statusCritical) && entity.isPrimary) {
-      await this.manualSwitch(undefined, {
-        reason: `Auto switch triggered: ${qualityDegraded ? 'quality downgrade' : 'status change'}`,
-      });
+    if (statusCritical && entity.isPrimary) {
+      entity.isPrimary = false;
     }
+
+    await this.virtualRepo.save(entity);
 
     return entity;
   }
@@ -137,37 +170,115 @@ export class NumbersService {
     return businessNumber;
   }
 
-  private async clearPrimaryFlag() {
-    await this.virtualRepo.update({ isPrimary: true }, { isPrimary: false });
+  async selectRandomActiveNumber(options: PickRandomActiveNumberOptions = {}): Promise<VirtualNumber | null> {
+    const selected = await this.pickRandomActiveNumber(options);
+
+    if (!selected) {
+      return null;
+    }
+
+    await this.touchUsage(selected.id);
+    return selected;
   }
 
-  private async pickBestCandidate(): Promise<VirtualNumber | null> {
-    const preferredOrder: VirtualNumberQuality[] = [
-      VirtualNumberQuality.HIGH,
-      VirtualNumberQuality.MEDIUM,
-      VirtualNumberQuality.LOW,
-      VirtualNumberQuality.UNKNOWN,
-    ];
+  private async pickRandomActiveNumber(options: PickRandomActiveNumberOptions = {}): Promise<VirtualNumber | null> {
+    let candidates = await this.virtualRepo.find({
+      where: {
+        status: VirtualNumberStatus.ACTIVE,
+        isPrimary: true,
+      },
+    });
 
-    for (const quality of preferredOrder) {
-      const candidate = await this.virtualRepo.findOne({
+    if (!candidates.length) {
+      candidates = await this.virtualRepo.find({
         where: {
           status: VirtualNumberStatus.ACTIVE,
-          qualityRating: quality,
         },
-        order: { lastUsedAt: 'ASC', id: 'ASC' },
       });
+    }
 
-      if (candidate) {
-        return candidate;
+    if (!candidates.length) {
+      return null;
+    }
+
+    const {
+      excludeIds = [],
+      maxMessageCount24h,
+      cooldownMinutes,
+      qualityWeights,
+    } = options;
+
+    const exclusionSet = new Set(excludeIds);
+    const cooldownMs = cooldownMinutes ? cooldownMinutes * 60_000 : 0;
+    const weights = { ...DEFAULT_QUALITY_WEIGHTS, ...qualityWeights };
+    const now = Date.now();
+
+    const filtered = candidates.filter((candidate) => {
+      if (exclusionSet.has(candidate.id)) {
+        return false;
+      }
+
+      if (maxMessageCount24h !== undefined && candidate.messageCount24h >= maxMessageCount24h) {
+        return false;
+      }
+
+      if (cooldownMs && candidate.lastUsedAt) {
+        const diff = now - candidate.lastUsedAt.getTime();
+        if (diff < cooldownMs) {
+          return false;
+        }
+      }
+
+      return true;
+    });
+
+    const pool = filtered.length ? filtered : candidates;
+
+    const weightedPool = pool.map((candidate) => {
+      const qualityWeight = weights[candidate.qualityRating] ?? 1;
+      let usageFactor = 1;
+
+      if (maxMessageCount24h) {
+        const utilisation = candidate.messageCount24h / maxMessageCount24h;
+        usageFactor = Math.max(0.25, 1 - Math.min(utilisation, 0.9));
+      }
+
+      let cooldownMultiplier = 1;
+      if (cooldownMs) {
+        if (!candidate.lastUsedAt) {
+          cooldownMultiplier = 1.5;
+        } else {
+          const diff = now - candidate.lastUsedAt.getTime();
+          cooldownMultiplier = diff >= cooldownMs ? 1.5 : Math.max(0.5, diff / cooldownMs);
+        }
+      }
+
+      const weight = qualityWeight * usageFactor * cooldownMultiplier;
+      return {
+        candidate,
+        weight: Math.max(weight, 0.1),
+      };
+    });
+
+    const totalWeight = weightedPool.reduce((acc, entry) => acc + entry.weight, 0);
+
+    if (!totalWeight) {
+      return weightedPool[0]?.candidate ?? null;
+    }
+
+    let threshold = Math.random() * totalWeight;
+    for (const entry of weightedPool) {
+      threshold -= entry.weight;
+      if (threshold <= 0) {
+        return entry.candidate;
       }
     }
 
-    // fallback any active
-    return this.virtualRepo.findOne({
-      where: { status: VirtualNumberStatus.ACTIVE },
-      order: { lastUsedAt: 'ASC', id: 'ASC' },
-    });
+    return weightedPool[weightedPool.length - 1]?.candidate ?? null;
+  }
+
+  private async touchUsage(id: number): Promise<void> {
+    await this.virtualRepo.update({ id }, { lastUsedAt: new Date() });
   }
 
   private isQualityDowngrade(previous: VirtualNumberQuality, next: VirtualNumberQuality): boolean {

@@ -233,7 +233,7 @@ export class ContactsService {
       }
 
       const phonesFound = Array.from(uniquePhones);
-      const newPhones = await this.excludeExistingPhones(phonesFound, user.id);
+      const newPhones = await this.excludeExistingPhones(phonesFound);
 
       if (newPhones.length > 0) {
         console.log(`Saving ${newPhones.length} contacts to database`);
@@ -288,7 +288,7 @@ export class ContactsService {
           .on('end', async () => {
             try {
               const phonesFound = Array.from(uniquePhones);
-              const newPhones = await this.excludeExistingPhones(phonesFound, user.id);
+              const newPhones = await this.excludeExistingPhones(phonesFound);
 
               if (newPhones.length > 0) {
                 console.log(`Saving ${newPhones.length} contacts to database`);
@@ -404,7 +404,7 @@ export class ContactsService {
     return cleaned;
   }
 
-  private async excludeExistingPhones(phones: string[], userId: number): Promise<string[]> {
+  private async excludeExistingPhones(phones: string[]): Promise<string[]> {
     if (!phones.length) {
       return [];
     }
@@ -417,7 +417,6 @@ export class ContactsService {
       const found = await this.contactRepo.find({
         select: ['phone'],
         where: {
-          user: { id: userId },
           phone: In(chunk),
         },
       });

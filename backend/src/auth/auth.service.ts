@@ -19,7 +19,7 @@ export class AuthService {
     // Explicitly select the password column (mapped as passwordHash) even though it's select: false
     const user = await this.userRepository
       .createQueryBuilder('user')
-      .addSelect('user.password')
+      .addSelect('user.passwordHash')
       .where('user.username = :username', { username: loginDto.username })
       .getOne();
 
@@ -29,10 +29,30 @@ export class AuthService {
 
     // Add additional logging for debugging login issues
     console.log('Comparing passwords for user:', user.username);
-    const isPasswordValid = await bcrypt.compare(
-      loginDto.password,
-      user.passwordHash,
-    );
+    let isPasswordValid = false;
+
+    try {
+      isPasswordValid = await bcrypt.compare(
+        loginDto.password,
+        user.passwordHash,
+      );
+    } catch (error) {
+      console.warn(
+        `Failed to compare bcrypt hash for user ${user.username}:`,
+        error,
+      );
+    }
+
+    // If legacy accounts stored plaintext passwords, transparently upgrade them
+    if (!isPasswordValid && user.passwordHash === loginDto.password) {
+      console.log(
+        `Upgrading plaintext password to bcrypt hash for user ${user.username}`,
+      );
+      const newHash = await bcrypt.hash(loginDto.password, 10);
+      await this.userRepository.update(user.id, { passwordHash: newHash });
+      isPasswordValid = true;
+    }
+
     console.log('Password validation result:', isPasswordValid);
 
     if (!isPasswordValid) {

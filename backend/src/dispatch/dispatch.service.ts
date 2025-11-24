@@ -3,7 +3,6 @@ import { InjectRepository } from '@nestjs/typeorm';
 import { randomUUID } from 'crypto';
 import {
   CampaignDispatchBatch,
-  DispatchJobStatus,
   EnqueueCampaignOptions,
   EnqueueCampaignResult,
   DispatchSenderContext,
@@ -73,43 +72,6 @@ export class DispatchService {
     return batchSize;
   }
 
-  private async triggerNumberSwitch(options: EnqueueCampaignOptions, reason: string) {
-    try {
-      const switched = await this.numbersService.manualSwitch(undefined, {
-        reason,
-      });
-
-      const previous = this.campaignSender.get(options.campaignId) || {
-        virtualNumberId: options.assignedNumberId,
-        virtualNumberLabel: options.assignedNumberLabel,
-        businessNumberId: options.businessNumberId,
-        businessNumber: options.businessNumber,
-      };
-
-      const updated: DispatchSenderContext = {
-        ...previous,
-        virtualNumberId: switched.id,
-        virtualNumberLabel: switched.phoneNumberId,
-        businessNumberId: switched.businessNumber?.id ?? previous.businessNumberId,
-        businessNumber:
-          switched.businessNumber?.displayPhoneNumber ||
-          switched.businessNumber?.businessName ||
-          previous.businessNumber,
-        switchedAt: new Date(),
-        switchReason: reason,
-      };
-
-      this.campaignSender.set(options.campaignId, updated);
-      this.logger.warn(
-        `Auto-switched virtual number for campaign ${options.campaignId} to ${updated.virtualNumberLabel || updated.virtualNumberId} (${reason})`,
-      );
-    } catch (error) {
-      this.logger.error(
-        `Failed to auto-switch virtual number for campaign ${options.campaignId}: ${(error as Error).message}`,
-      );
-    }
-  }
-
   private async enqueueWithManager(
     manager: EntityManager,
     options: EnqueueCampaignOptions,
@@ -117,30 +79,55 @@ export class DispatchService {
     const batchSize = options.batchSize || DEFAULT_BATCH_SIZE;
     const totalBatches = Math.max(1, Math.ceil(options.recipientsCount / batchSize));
 
-    const initialSender: DispatchSenderContext = {
-      virtualNumberId: options.assignedNumberId,
-      virtualNumberLabel: options.assignedNumberLabel,
-      businessNumberId: options.businessNumberId,
-      businessNumber: options.businessNumber,
-    };
-
-    this.campaignSender.set(options.campaignId, initialSender);
-
     const jobRepo = manager.getRepository(CampaignJob);
     const jobs: CampaignJob[] = [];
     const jobIds: string[] = [];
+
+    const rotationHistory: DispatchSenderContext[] = [];
 
     for (let index = 0; index < totalBatches; index++) {
       const jobId = this.generateJobId(options.campaignId);
       jobIds.push(jobId);
 
+      const rotationReason = index === 0 ? 'initial dispatch allocation' : `rotation for batch ${index + 1}`;
+
+      const selectionOptions = {
+        excludeIds: index === 0 ? [] : rotationHistory.map((context) => context.virtualNumberId),
+        maxMessageCount24h: options.batchSize,
+        cooldownMinutes: 5,
+      } as const;
+
+      const selectedNumber = await this.numbersService.selectRandomActiveNumber(selectionOptions);
+
+      if (!selectedNumber) {
+        throw new Error('No eligible virtual numbers available during dispatch enqueue');
+      }
+
+      const senderContext: DispatchSenderContext = {
+        virtualNumberId: selectedNumber.id,
+        virtualNumberLabel: selectedNumber.phoneNumberId,
+        businessNumberId: selectedNumber.businessNumber?.id,
+        businessNumber:
+          selectedNumber.businessNumber?.displayPhoneNumber ||
+          selectedNumber.businessNumber?.businessName ||
+          options.businessNumber,
+        switchedAt: new Date(),
+        switchReason: rotationReason,
+      };
+
+      rotationHistory.push(senderContext);
+
+      this.logger.log(
+        `Batch ${index + 1}/${totalBatches} for campaign ${options.campaignId} assigned to virtual number ${senderContext.virtualNumberLabel || senderContext.virtualNumberId} (${rotationReason})`,
+      );
+
       const entity = jobRepo.create({
         campaignId: options.campaignId,
         userId: options.userId,
-        virtualNumberId: options.assignedNumberId,
-        virtualNumberLabel: options.assignedNumberLabel,
-        businessNumberId: options.businessNumberId,
-        businessNumber: options.businessNumber,
+        virtualNumberId: senderContext.virtualNumberId,
+        virtualNumberLabel: senderContext.virtualNumberLabel,
+        businessNumberId: senderContext.businessNumberId,
+        businessNumber: senderContext.businessNumber,
         caption: options.messagePayload?.caption ?? null,
         mediaUrl: options.messagePayload?.media_url ?? null,
         mediaType: options.messagePayload?.media_type ?? null,
@@ -165,13 +152,25 @@ export class DispatchService {
       `Enqueued ${totalBatches} batch(es) for campaign ${options.campaignId} (user ${options.userId}) via ${options.enqueueReason}`,
     );
 
+    const finalSender = rotationHistory[rotationHistory.length - 1];
+    if (finalSender) {
+      this.campaignSender.set(options.campaignId, finalSender);
+    }
+
     return {
       jobIds,
       totalBatches,
       batchSize,
       estimatedDurationSeconds,
       batches,
-      sender: { ...initialSender },
+      sender: finalSender
+        ? { ...finalSender }
+        : {
+            virtualNumberId: options.assignedNumberId,
+            virtualNumberLabel: options.assignedNumberLabel,
+            businessNumberId: options.businessNumberId,
+            businessNumber: options.businessNumber,
+          },
     };
   }
 
