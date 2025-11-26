@@ -1,4 +1,5 @@
-import { IsBoolean, IsNotEmpty, IsOptional, IsString } from 'class-validator';
+import { IsBoolean, IsEnum, IsNotEmpty, IsOptional, IsString } from 'class-validator';
+import { NumberRoutingMode } from '../enums';
 
 export class UpdateBusinessNumberDto {
   @IsOptional()
@@ -20,4 +21,8 @@ export class UpdateBusinessNumberDto {
   @IsOptional()
   @IsBoolean()
   autoSwitchEnabled?: boolean;
+
+  @IsOptional()
+  @IsEnum(NumberRoutingMode)
+  routingMode?: NumberRoutingMode;
 }

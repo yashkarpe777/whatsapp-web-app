@@ -7,6 +7,7 @@ import {
   UpdateDateColumn,
 } from 'typeorm';
 import { VirtualNumber } from './virtual-number.entity';
+import { NumberRoutingMode } from '../enums';
 
 @Entity('business_numbers')
 export class BusinessNumber {
@@ -30,6 +31,14 @@ export class BusinessNumber {
 
   @Column({ name: 'auto_switch_enabled', default: true })
   autoSwitchEnabled: boolean;
+
+  @Column({
+    name: 'routing_mode',
+    type: 'enum',
+    enum: NumberRoutingMode,
+    default: NumberRoutingMode.VIRTUAL,
+  })
+  routingMode: NumberRoutingMode;
 
   @CreateDateColumn({ name: 'created_at' })
   createdAt: Date;

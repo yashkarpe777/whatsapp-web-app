@@ -12,3 +12,8 @@ export enum VirtualNumberQuality {
   LOW = 'low',
   UNKNOWN = 'unknown',
 }
+
+export enum NumberRoutingMode {
+  BUSINESS = 'business',
+  VIRTUAL = 'virtual',
+}

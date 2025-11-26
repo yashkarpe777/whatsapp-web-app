@@ -5,6 +5,8 @@ export type DispatchJobStatus =
   | 'failed'
   | 'cancelled';
 
+import { NumberRoutingMode } from '../../numbers/enums';
+
 export interface CampaignDispatchBatch {
   id: string;
   campaignId: number;
@@ -29,7 +31,8 @@ export interface DispatchMessagePayload {
 }
 
 export interface DispatchSenderContext {
-  virtualNumberId: number;
+  routingMode: NumberRoutingMode;
+  virtualNumberId?: number;
   virtualNumberLabel?: string;
   businessNumberId?: number;
   businessNumber?: string;
@@ -44,10 +47,11 @@ export interface EnqueueCampaignOptions {
   preferredNumberId?: number;
   enqueueReason: 'manual_run' | 'auto_retry' | 'scheduled';
   batchSize?: number;
-  assignedNumberId: number;
+  assignedNumberId?: number;
   assignedNumberLabel?: string;
   businessNumberId?: number;
   businessNumber?: string;
+  routingMode?: NumberRoutingMode;
   simulateBan?: boolean;
   messagePayload?: DispatchMessagePayload;
 }

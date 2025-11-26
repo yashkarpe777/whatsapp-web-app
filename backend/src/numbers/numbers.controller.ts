@@ -1,6 +1,7 @@
 import {
   Body,
   Controller,
+  Delete,
   Get,
   Param,
   ParseIntPipe,
@@ -54,5 +55,10 @@ export class NumbersController {
   @Put('virtual-numbers/switch')
   manualSwitch(@Body() dto: ManualSwitchDto) {
     return this.numbersService.manualSwitch(dto.targetId);
+  }
+
+  @Delete('virtual-numbers/:id')
+  removeVirtualNumber(@Param('id', ParseIntPipe) id: number) {
+    return this.numbersService.removeVirtualNumber(id);
   }
 }

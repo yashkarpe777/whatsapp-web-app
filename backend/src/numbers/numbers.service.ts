@@ -6,7 +6,7 @@ import { BusinessNumber } from './entities/business-number.entity';
 import { CreateVirtualNumberDto } from './dto/create-virtual-number.dto';
 import { UpdateVirtualNumberDto } from './dto/update-virtual-number.dto';
 import { UpdateBusinessNumberDto } from './dto/update-business-number.dto';
-import { VirtualNumberQuality, VirtualNumberStatus } from './enums';
+import { NumberRoutingMode, VirtualNumberQuality, VirtualNumberStatus } from './enums';
 
 type SwitchContext = {
   reason: string;
@@ -94,7 +94,37 @@ export class NumbersService {
     return this.virtualRepo.save(entity);
   }
 
+  async removeVirtualNumber(id: number): Promise<{ success: boolean }> {
+    const entity = await this.virtualRepo.findOne({ where: { id } });
+    if (!entity) {
+      throw new NotFoundException('Virtual number not found');
+    }
+
+    const businessNumber = await this.getBusinessNumber();
+    if (businessNumber?.routingMode === NumberRoutingMode.VIRTUAL) {
+      const remainingPrimaries = await this.virtualRepo.count({
+        where: {
+          id: Not(id),
+          isPrimary: true,
+          status: VirtualNumberStatus.ACTIVE,
+        },
+      });
+
+      if (remainingPrimaries === 0) {
+        this.logger.warn(`Deleting virtual number ${id} leaves no rotation-eligible numbers.`);
+      }
+    }
+
+    await this.virtualRepo.remove(entity);
+    return { success: true };
+  }
+
   async manualSwitch(targetId?: number, context: SwitchContext = { reason: 'manual switch' }): Promise<VirtualNumber> {
+    const businessNumber = await this.getBusinessNumber();
+    if (businessNumber?.routingMode === NumberRoutingMode.BUSINESS) {
+      throw new BadRequestException('Manual switch is disabled while routing mode is set to business number');
+    }
+
     let target: VirtualNumber | null = null;
 
     if (targetId) {
@@ -171,6 +201,12 @@ export class NumbersService {
   }
 
   async selectRandomActiveNumber(options: PickRandomActiveNumberOptions = {}): Promise<VirtualNumber | null> {
+    const businessNumber = await this.getBusinessNumber();
+    if (businessNumber?.routingMode === NumberRoutingMode.BUSINESS) {
+      this.logger.debug('Routing mode set to business number; skipping virtual number selection');
+      return null;
+    }
+
     const selected = await this.pickRandomActiveNumber(options);
 
     if (!selected) {

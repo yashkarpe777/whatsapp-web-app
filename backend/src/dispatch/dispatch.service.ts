@@ -8,6 +8,7 @@ import {
   DispatchSenderContext,
 } from './types/dispatch-job';
 import { NumbersService } from '../numbers/numbers.service';
+import { NumberRoutingMode } from '../numbers/enums';
 import { Repository, EntityManager } from 'typeorm';
 import { CampaignJob } from './entities/campaign-job.entity';
 import { SentMessage } from './entities/sent-message.entity';
@@ -99,21 +100,30 @@ export class DispatchService {
 
       const selectedNumber = await this.numbersService.selectRandomActiveNumber(selectionOptions);
 
-      if (!selectedNumber) {
+      const senderContext: DispatchSenderContext = selectedNumber
+        ? {
+            routingMode: options.routingMode ?? NumberRoutingMode.VIRTUAL,
+            virtualNumberId: selectedNumber.id,
+            virtualNumberLabel: selectedNumber.phoneNumberId,
+            businessNumberId: selectedNumber.businessNumber?.id,
+            businessNumber:
+              selectedNumber.businessNumber?.displayPhoneNumber ||
+              selectedNumber.businessNumber?.businessName ||
+              options.businessNumber,
+            switchedAt: new Date(),
+            switchReason: rotationReason,
+          }
+        : {
+            routingMode: options.routingMode ?? NumberRoutingMode.BUSINESS,
+            businessNumberId: options.businessNumberId,
+            businessNumber: options.businessNumber,
+            switchedAt: new Date(),
+            switchReason: rotationReason,
+          };
+
+      if (!selectedNumber && senderContext.routingMode === NumberRoutingMode.VIRTUAL) {
         throw new Error('No eligible virtual numbers available during dispatch enqueue');
       }
-
-      const senderContext: DispatchSenderContext = {
-        virtualNumberId: selectedNumber.id,
-        virtualNumberLabel: selectedNumber.phoneNumberId,
-        businessNumberId: selectedNumber.businessNumber?.id,
-        businessNumber:
-          selectedNumber.businessNumber?.displayPhoneNumber ||
-          selectedNumber.businessNumber?.businessName ||
-          options.businessNumber,
-        switchedAt: new Date(),
-        switchReason: rotationReason,
-      };
 
       rotationHistory.push(senderContext);
 
@@ -124,8 +134,8 @@ export class DispatchService {
       const entity = jobRepo.create({
         campaignId: options.campaignId,
         userId: options.userId,
-        virtualNumberId: senderContext.virtualNumberId,
-        virtualNumberLabel: senderContext.virtualNumberLabel,
+        virtualNumberId: senderContext.virtualNumberId ?? null,
+        virtualNumberLabel: senderContext.virtualNumberLabel ?? null,
         businessNumberId: senderContext.businessNumberId,
         businessNumber: senderContext.businessNumber,
         caption: options.messagePayload?.caption ?? null,
@@ -166,6 +176,7 @@ export class DispatchService {
       sender: finalSender
         ? { ...finalSender }
         : {
+            routingMode: options.routingMode ?? NumberRoutingMode.VIRTUAL,
             virtualNumberId: options.assignedNumberId,
             virtualNumberLabel: options.assignedNumberLabel,
             businessNumberId: options.businessNumberId,
